@@ -3134,15 +3134,6 @@ var AMBIENT_GROUND_DAY = new THREE2.Color(4865069);
 var RAYLEIGH_EXTINCTION_BASE = new THREE2.Vector3(0.06, 0.12, 0.24);
 var MIE_EXTINCTION_BASE = new THREE2.Vector3(0.015, 0.015, 0.015);
 var ABSORPTION_EXTINCTION_BASE = new THREE2.Vector3(3e-3, 0.02, 2e-3);
-var normalizeEnvironmentMode = (mode) => {
-  if (mode === "manual") {
-    return "manual";
-  }
-  if (mode === "every-frame") {
-    return "every-frame";
-  }
-  return "on-change";
-};
 var createEnvironmentTarget = (resolution) => {
   const target = new THREE2.WebGLCubeRenderTarget(resolution, {
     type: THREE2.HalfFloatType,
@@ -3190,7 +3181,7 @@ var createAtmosphereRig = (scene, options = {}) => {
   scene.add(ambientLight);
   const environmentOptions = options.environment ?? {};
   const environmentEnabled = environmentOptions.enabled ?? false;
-  const environmentMode = normalizeEnvironmentMode(environmentOptions.mode);
+  const environmentMode = environmentOptions.mode ?? "on-change";
   const environmentApplyToScene = environmentOptions.applyToSceneEnvironment ?? true;
   const environmentCaptureOnPrime = environmentOptions.captureOnPrime ?? true;
   const environmentCaptureLayer = THREE2.MathUtils.clamp(
@@ -3327,10 +3318,6 @@ var createAtmosphereRig = (scene, options = {}) => {
       setCameraPosition(camera.position);
     }
     if (!environmentEnabled) {
-      return;
-    }
-    if (environmentMode === "every-frame") {
-      captureEnvironment(renderer, capturePositionScratch);
       return;
     }
     if (environmentMode === "on-change" && environmentDirty) {

@@ -16,7 +16,7 @@ export type AtmosphereSunState = {
   intensity: number
 }
 
-export type AtmosphereEnvironmentMode = 'on-change' | 'manual' | 'every-frame' | 'auto'
+export type AtmosphereEnvironmentMode = 'on-change' | 'manual'
 
 export type AtmosphereEnvironmentOptions = {
   enabled?: boolean
@@ -75,20 +75,6 @@ const AMBIENT_GROUND_DAY = new THREE.Color(0x4a3c2d)
 const RAYLEIGH_EXTINCTION_BASE = new THREE.Vector3(0.06, 0.12, 0.24)
 const MIE_EXTINCTION_BASE = new THREE.Vector3(0.015, 0.015, 0.015)
 const ABSORPTION_EXTINCTION_BASE = new THREE.Vector3(0.003, 0.02, 0.002)
-
-type NormalizedEnvironmentMode = 'on-change' | 'manual' | 'every-frame'
-
-const normalizeEnvironmentMode = (
-  mode: AtmosphereEnvironmentMode | undefined,
-): NormalizedEnvironmentMode => {
-  if (mode === 'manual') {
-    return 'manual'
-  }
-  if (mode === 'every-frame') {
-    return 'every-frame'
-  }
-  return 'on-change'
-}
 
 const createEnvironmentTarget = (resolution: number): THREE.WebGLCubeRenderTarget => {
   const target = new THREE.WebGLCubeRenderTarget(resolution, {
@@ -154,7 +140,7 @@ export const createAtmosphereRig = (
 
   const environmentOptions = options.environment ?? {}
   const environmentEnabled = environmentOptions.enabled ?? false
-  const environmentMode = normalizeEnvironmentMode(environmentOptions.mode)
+  const environmentMode: AtmosphereEnvironmentMode = environmentOptions.mode ?? 'on-change'
   const environmentApplyToScene = environmentOptions.applyToSceneEnvironment ?? true
   const environmentCaptureOnPrime = environmentOptions.captureOnPrime ?? true
   const environmentCaptureLayer = THREE.MathUtils.clamp(
@@ -343,10 +329,6 @@ export const createAtmosphereRig = (
       setCameraPosition(camera.position)
     }
     if (!environmentEnabled) {
-      return
-    }
-    if (environmentMode === 'every-frame') {
-      captureEnvironment(renderer, capturePositionScratch)
       return
     }
     if (environmentMode === 'on-change' && environmentDirty) {

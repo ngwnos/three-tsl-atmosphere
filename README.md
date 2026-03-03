@@ -55,8 +55,7 @@ renderer.render(scene, camera)
 
 - `environment.enabled: false` (default): no cubemap capture, fastest dynamic sun updates.
 - `environment.enabled: true, mode: 'manual'`: baked/static probe (capture on `prime()` by default, or call `requestEnvironmentCapture()` manually).
-- `environment.enabled: true, mode: 'on-change'` (or legacy `'auto'`): recapture only when sun/settings change.
-- `environment.enabled: true, mode: 'every-frame'`: fully dynamic probe capture (highest cost).
+- `environment.enabled: true, mode: 'on-change'`: recapture only when sun/settings change.
 
 ## API
 
@@ -64,8 +63,3 @@ renderer.render(scene, camera)
 - `createAtmosphereSystem(scene, settings?, options?)`
 - `DEFAULT_ATMOSPHERE_SETTINGS`
 - `sunDirectionFromAngles(altitudeDeg, azimuthDeg, target?)`
-
-## Attribution
-
-Bruneton atmosphere implementation is based on Eric Bruneton's precomputed atmospheric scattering reference implementation.
-The copied files retain the original copyright and license header notices.

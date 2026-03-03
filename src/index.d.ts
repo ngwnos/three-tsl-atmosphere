@@ -59,7 +59,7 @@ export type AtmosphereSunState = {
   intensity: number
 }
 
-export type AtmosphereEnvironmentMode = 'on-change' | 'manual' | 'every-frame' | 'auto'
+export type AtmosphereEnvironmentMode = 'on-change' | 'manual'
 
 export type AtmosphereEnvironmentOptions = {
   enabled?: boolean
