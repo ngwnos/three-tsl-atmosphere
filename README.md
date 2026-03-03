@@ -2,6 +2,12 @@
 
 Reusable Bruneton-style precomputed atmospheric scattering for `three` WebGPU + TSL.
 
+Includes a high-level rig that wires:
+- atmosphere sky
+- directional sun light
+- hemisphere ambient light
+- optional cube environment capture (usable as scene `environment`)
+
 This package extracts and packages the LUT precompute + sky runtime workflow into a standalone module.
 
 ## Install
@@ -10,34 +16,44 @@ This package extracts and packages the LUT precompute + sky runtime workflow int
 bun add github:ngwnos/three-tsl-atmosphere#main
 ```
 
-## Usage
+## Usage (Drop-In Rig)
 
 ```ts
 import * as THREE from 'three'
 import { WebGPURenderer } from 'three/webgpu'
 import {
-  createAtmosphereSystem,
-  DEFAULT_ATMOSPHERE_SETTINGS,
-  sunDirectionFromAngles,
+  createAtmosphereRig,
 } from 'three-tsl-atmosphere'
 
 const scene = new THREE.Scene()
 const renderer = new WebGPURenderer({ canvas })
 await renderer.init()
 
-const atmosphere = createAtmosphereSystem(scene, DEFAULT_ATMOSPHERE_SETTINGS)
-await atmosphere.prime(renderer)
+const atmosphereRig = createAtmosphereRig(scene, {
+  sun: {
+    altitudeDeg: 30,
+    azimuthDeg: 0,
+    intensity: 1.2,
+  },
+  environment: {
+    enabled: true,
+    mode: 'auto',
+    resolution: 256,
+  },
+})
+await atmosphereRig.prime(renderer)
 
-const sunDirection = sunDirectionFromAngles(45, 30)
-atmosphere.setSunDirection(sunDirection)
+atmosphereRig.setSunAngles(42, 24)
+atmosphereRig.setSunIntensity(2.0)
 
 // each frame / render pass
-atmosphere.setCameraPosition(camera.position)
+atmosphereRig.update(renderer, camera)
 renderer.render(scene, camera)
 ```
 
 ## API
 
+- `createAtmosphereRig(scene, options?)`
 - `createAtmosphereSystem(scene, settings?, options?)`
 - `DEFAULT_ATMOSPHERE_SETTINGS`
 - `sunDirectionFromAngles(altitudeDeg, azimuthDeg, target?)`
