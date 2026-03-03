@@ -1,0 +1,40 @@
+{
+  "name": "three-tsl-atmosphere",
+  "version": "0.1.0",
+  "description": "Reusable Bruneton-style precomputed atmosphere LUT system for three.js TSL/WebGPU",
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup src/index.ts --format esm --clean && cp src/index.d.ts dist/index.d.ts",
+    "dev": "tsup src/index.ts --format esm --watch"
+  },
+  "keywords": [
+    "three",
+    "webgpu",
+    "tsl",
+    "atmosphere",
+    "bruneton",
+    "scattering"
+  ],
+  "license": "BSD-3-Clause",
+  "peerDependencies": {
+    "three": "^0.182.0 || ^0.183.0"
+  },
+  "devDependencies": {
+    "@types/three": "^0.183.0",
+    "three": "^0.183.0",
+    "tsup": "^8.5.0",
+    "typescript": "^5.9.3"
+  }
+}
