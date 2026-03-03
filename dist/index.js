@@ -340,7 +340,7 @@ var AtmosphereContextBaseNode = class _AtmosphereContextBaseNode extends ThreeNo
 };
 
 // src/bruneton/AtmosphereLUTNode.ts
-import { Data3DTexture, FloatType, HalfFloatType, Texture } from "three";
+import { Data3DTexture as Data3DTexture2, FloatType, HalfFloatType, Texture } from "three";
 import {
   Node,
   NodeUpdateType,
@@ -420,6 +420,8 @@ var cancelIdleCallback = typeof window !== "undefined" && window.cancelIdleCallb
 // src/bruneton/AtmosphereLUTTexturesWebGPU.ts
 import {
   Box3,
+  Data3DTexture,
+  DataTexture,
   LinearFilter,
   NoColorSpace
 } from "three";
@@ -430,7 +432,6 @@ import {
   If as If3,
   int,
   Return,
-  storageTexture,
   texture,
   textureLoad,
   texture3D,
@@ -1950,6 +1951,24 @@ function createStorage3DTexture(name) {
   texture2.name = name;
   return texture2;
 }
+function createReadTexture(name) {
+  const texture2 = new DataTexture();
+  texture2.minFilter = LinearFilter;
+  texture2.magFilter = LinearFilter;
+  texture2.colorSpace = NoColorSpace;
+  texture2.generateMipmaps = false;
+  texture2.name = name;
+  return texture2;
+}
+function createRead3DTexture(name) {
+  const texture2 = new Data3DTexture(null, 1, 1, 1);
+  texture2.minFilter = LinearFilter;
+  texture2.magFilter = LinearFilter;
+  texture2.colorSpace = NoColorSpace;
+  texture2.generateMipmaps = false;
+  texture2.name = name;
+  return texture2;
+}
 function setupStorageTexture(texture2, textureType, size) {
   texture2.type = textureType;
   reinterpretType(texture2.image);
@@ -1969,11 +1988,9 @@ var AtmosphereLUTTexturesContextWebGPU = class extends AtmosphereLUTTexturesCont
   deltaRayleighScattering = createStorage3DTexture("deltaRayleighScattering");
   deltaMieScattering = createStorage3DTexture("deltaMieScattering");
   deltaScatteringDensity = createStorage3DTexture("deltaScatteringDensity");
-  irradianceRead = createStorageTexture("irradianceRead");
-  scatteringRead = createStorage3DTexture("scatteringRead");
-  higherOrderScatteringRead = createStorage3DTexture(
-    "higherOrderScatteringRead"
-  );
+  irradianceRead = createReadTexture("irradianceRead");
+  scatteringRead = createRead3DTexture("scatteringRead");
+  higherOrderScatteringRead = createRead3DTexture("higherOrderScatteringRead");
   // deltaMultipleScattering is only needed to compute scattering order 3 or
   // more, while deltaRayleighScattering and deltaMieScattering are only needed
   // to compute double scattering. Therefore, to save memory, we can store
@@ -2234,7 +2251,6 @@ var AtmosphereLUTTexturesWebGPU = class extends AtmosphereLUTTextures {
       If3(globalId.xy.greaterThanEqual(size).any(), () => {
         Return();
       });
-      const irradianceReadStorage = storageTexture(irradianceRead).toReadOnly();
       const irradiance = computeIndirectIrradianceTexture(
         texture3D(deltaRayleighScattering),
         texture3D(deltaMieScattering),
@@ -2245,7 +2261,7 @@ var AtmosphereLUTTexturesWebGPU = class extends AtmosphereLUTTextures {
       textureStore(
         this.irradiance,
         globalId.xy,
-        textureLoad(irradianceReadStorage, globalId.xy).add(
+        textureLoad(irradianceRead, globalId.xy, int(0)).add(
           irradiance.mul(luminanceFromRadiance)
         )
       );
@@ -2290,10 +2306,6 @@ var AtmosphereLUTTexturesWebGPU = class extends AtmosphereLUTTextures {
       If3(globalId.greaterThanEqual(size).any(), () => {
         Return();
       });
-      const scatteringReadStorage = storageTexture(scatteringRead).toReadOnly();
-      const higherOrderScatteringReadStorage = storageTexture(
-        higherOrderScatteringRead
-      ).toReadOnly();
       const multipleScattering = computeMultipleScatteringTexture(
         texture(
           parameters.transmittancePrecisionLog ? opticalDepth : this.transmittance
@@ -2307,16 +2319,14 @@ var AtmosphereLUTTexturesWebGPU = class extends AtmosphereLUTTextures {
       textureStore(
         this.scattering,
         globalId,
-        textureLoad(scatteringReadStorage, globalId).add(vec43(luminance, 0))
+        texture3D(scatteringRead, vec34(globalId), int(0)).setSampler(false).add(vec43(luminance, 0))
       );
       textureStore(deltaMultipleScattering, globalId, vec43(radiance, 1));
       if (parameters.higherOrderScatteringTexture) {
         textureStore(
           this.higherOrderScattering,
           globalId,
-          textureLoad(higherOrderScatteringReadStorage, globalId).add(
-            vec43(luminance, 1)
-          )
+          texture3D(higherOrderScatteringRead, vec34(globalId), int(0)).setSampler(false).add(vec43(luminance, 1))
         );
       }
     })().context({ atmosphere: context }).compute(
@@ -2398,7 +2408,7 @@ function run(renderer, task) {
   return true;
 }
 var emptyTexture = /* @__PURE__ */ new Texture();
-var emptyTexture3D = /* @__PURE__ */ new Data3DTexture();
+var emptyTexture3D = /* @__PURE__ */ new Data3DTexture2();
 var AtmosphereLUTNode = class extends Node {
   static get type() {
     return "AtmosphereLUTNode";
