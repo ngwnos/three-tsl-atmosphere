@@ -431,6 +431,8 @@ import {
   int,
   Return,
   texture,
+  texture3DLoad,
+  textureLoad,
   texture3D,
   textureStore,
   uniform as uniform2,
@@ -2242,7 +2244,9 @@ var AtmosphereLUTTexturesWebGPU = class extends AtmosphereLUTTextures {
       textureStore(
         this.irradiance,
         globalId.xy,
-        texture(irradianceRead, null, int(0)).load(globalId.xy).add(irradiance.mul(luminanceFromRadiance))
+        textureLoad(irradianceRead, globalId.xy, int(0)).add(
+          irradiance.mul(luminanceFromRadiance)
+        )
       );
       textureStore(deltaIrradiance, globalId.xy, irradiance);
     })().context({ atmosphere: context }).compute(
@@ -2298,14 +2302,16 @@ var AtmosphereLUTTexturesWebGPU = class extends AtmosphereLUTTextures {
       textureStore(
         this.scattering,
         globalId,
-        texture3D(scatteringRead, null, int(0)).load(globalId).add(vec43(luminance, 0))
+        texture3DLoad(scatteringRead, globalId, int(0)).add(vec43(luminance, 0))
       );
       textureStore(deltaMultipleScattering, globalId, vec43(radiance, 1));
       if (parameters.higherOrderScatteringTexture) {
         textureStore(
           this.higherOrderScattering,
           globalId,
-          texture3D(higherOrderScatteringRead, null, int(0)).load(globalId).add(vec43(luminance, 1))
+          texture3DLoad(higherOrderScatteringRead, globalId, int(0)).add(
+            vec43(luminance, 1)
+          )
         );
       }
     })().context({ atmosphere: context }).compute(
