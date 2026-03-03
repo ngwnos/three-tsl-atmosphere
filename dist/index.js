@@ -3150,7 +3150,7 @@ var computeAirMass = (altitudeDeg) => {
   return 1 / Math.max(0.03, cosZenith + 0.15 * Math.pow(Math.max(0.01, 93.885 - zenithDegrees), -1.253));
 };
 var createAtmosphereRig = (scene, options = {}) => {
-  let atmosphereSettings = {
+  let baseAtmosphereSettings = {
     ...DEFAULT_ATMOSPHERE_SETTINGS,
     ...options.atmosphereSettings
   };
@@ -3164,7 +3164,7 @@ var createAtmosphereRig = (scene, options = {}) => {
   const syncAtmosphereToSun = options.syncAtmosphereToSun ?? true;
   const atmosphere = createAtmosphereSystem(
     scene,
-    atmosphereSettings,
+    baseAtmosphereSettings,
     options.atmosphereSystemOptions
   );
   atmosphere.setSkyLayer(skyLayer);
@@ -3240,9 +3240,9 @@ var createAtmosphereRig = (scene, options = {}) => {
       sunState.azimuthDeg,
       sunDirectionScratch
     );
-    const rayleighScale = Math.max(0, atmosphereSettings.rayleighScatteringMultiplier);
-    const mieScale = Math.max(0, atmosphereSettings.mieExtinctionMultiplier);
-    const absorptionScale = Math.max(0, atmosphereSettings.absorptionExtinctionMultiplier);
+    const rayleighScale = Math.max(0, baseAtmosphereSettings.rayleighScatteringMultiplier);
+    const mieScale = Math.max(0, baseAtmosphereSettings.mieExtinctionMultiplier);
+    const absorptionScale = Math.max(0, baseAtmosphereSettings.absorptionExtinctionMultiplier);
     extinctionScratch.copy(RAYLEIGH_EXTINCTION_BASE).multiplyScalar(rayleighScale).addScaledVector(MIE_EXTINCTION_BASE, mieScale).addScaledVector(ABSORPTION_EXTINCTION_BASE, absorptionScale).multiplyScalar(computeAirMass(sunState.altitudeDeg));
     sunColorScratch.setRGB(
       Math.exp(-extinctionScratch.x),
@@ -3255,11 +3255,11 @@ var createAtmosphereRig = (scene, options = {}) => {
     sunTarget.position.set(0, 0, 0);
     sunTarget.updateMatrixWorld();
     skyTintScratch.setRGB(
-      Math.max(0, atmosphereSettings.skyTintR),
-      Math.max(0, atmosphereSettings.skyTintG),
-      Math.max(0, atmosphereSettings.skyTintB)
+      Math.max(0, baseAtmosphereSettings.skyTintR),
+      Math.max(0, baseAtmosphereSettings.skyTintG),
+      Math.max(0, baseAtmosphereSettings.skyTintB)
     );
-    skyTintScratch.multiplyScalar(Math.max(0, atmosphereSettings.skyIntensity));
+    skyTintScratch.multiplyScalar(Math.max(0, baseAtmosphereSettings.skyIntensity));
     skyTintScratch.multiplyScalar(0.15 + daylight * 0.85);
     skyTintScratch.lerp(SKY_TINT_NIGHT, Math.pow(1 - daylight, 0.6));
     ambientGroundScratch.copy(AMBIENT_GROUND_NIGHT).lerp(AMBIENT_GROUND_DAY, Math.pow(daylight, 0.4));
@@ -3267,19 +3267,15 @@ var createAtmosphereRig = (scene, options = {}) => {
     ambientLight.groundColor.copy(ambientGroundScratch);
     ambientLight.intensity = Math.max(0, ambientIntensity * (0.1 + 0.9 * daylight));
     if (syncAtmosphereToSun) {
-      const skyTintStrength = THREE2.MathUtils.lerp(0.3, 1, unifiedSolarStrength);
-      atmosphereSettings = {
-        ...atmosphereSettings,
-        skyIntensity: THREE2.MathUtils.lerp(0.05, 3.2, unifiedSolarStrength),
-        skyTintR: skyTintScratch.r * skyTintStrength,
-        skyTintG: skyTintScratch.g * skyTintStrength,
-        skyTintB: skyTintScratch.b * skyTintStrength,
-        sunDiscIntensity: THREE2.MathUtils.lerp(0, 18, unifiedSolarStrength),
-        sunDiscColorR: sunColorScratch.r,
-        sunDiscColorG: sunColorScratch.g,
-        sunDiscColorB: sunColorScratch.b
+      const syncedAtmosphereSettings = {
+        ...baseAtmosphereSettings,
+        skyIntensity: baseAtmosphereSettings.skyIntensity * THREE2.MathUtils.lerp(0.08, 1, unifiedSolarStrength),
+        sunDiscIntensity: baseAtmosphereSettings.sunDiscIntensity * THREE2.MathUtils.lerp(0, 1.25, unifiedSolarStrength),
+        sunDiscColorR: baseAtmosphereSettings.sunDiscColorR * sunColorScratch.r,
+        sunDiscColorG: baseAtmosphereSettings.sunDiscColorG * sunColorScratch.g,
+        sunDiscColorB: baseAtmosphereSettings.sunDiscColorB * sunColorScratch.b
       };
-      atmosphere.setSettings(atmosphereSettings);
+      atmosphere.setSettings(syncedAtmosphereSettings);
     }
     atmosphere.setSunDirection(sunDirectionScratch);
     environmentDirty = true;
@@ -3296,10 +3292,9 @@ var createAtmosphereRig = (scene, options = {}) => {
     if (!environmentEnabled || !environmentCamera || !environmentTargets) {
       return;
     }
-    const readTarget = environmentTargets[environmentReadIndex];
     const writeTarget = environmentTargets[environmentWriteIndex];
     const previousSceneEnvironment = scene.environment;
-    scene.environment = readTarget.texture;
+    scene.environment = null;
     environmentCamera.renderTarget = writeTarget;
     environmentCamera.position.copy(position);
     environmentCamera.update(renderer, scene);
@@ -3335,8 +3330,12 @@ var createAtmosphereRig = (scene, options = {}) => {
     }
   };
   const setAtmosphereSettings = (next) => {
-    atmosphereSettings = { ...next };
-    atmosphere.setSettings(atmosphereSettings);
+    baseAtmosphereSettings = { ...next };
+    if (syncAtmosphereToSun) {
+      applyLightingAndAtmosphereFromSun();
+      return;
+    }
+    atmosphere.setSettings(baseAtmosphereSettings);
     environmentDirty = true;
   };
   const setAmbientIntensity = (next) => {

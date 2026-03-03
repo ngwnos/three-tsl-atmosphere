@@ -97,7 +97,7 @@ export const createAtmosphereRig = (
   scene: THREE.Scene,
   options: AtmosphereRigOptions = {},
 ): AtmosphereRig => {
-  let atmosphereSettings: AtmosphereSettings = {
+  let baseAtmosphereSettings: AtmosphereSettings = {
     ...DEFAULT_ATMOSPHERE_SETTINGS,
     ...options.atmosphereSettings,
   }
@@ -119,7 +119,7 @@ export const createAtmosphereRig = (
 
   const atmosphere = createAtmosphereSystem(
     scene,
-    atmosphereSettings,
+    baseAtmosphereSettings,
     options.atmosphereSystemOptions,
   )
   atmosphere.setSkyLayer(skyLayer)
@@ -217,9 +217,9 @@ export const createAtmosphereRig = (
       sunDirectionScratch,
     )
 
-    const rayleighScale = Math.max(0, atmosphereSettings.rayleighScatteringMultiplier)
-    const mieScale = Math.max(0, atmosphereSettings.mieExtinctionMultiplier)
-    const absorptionScale = Math.max(0, atmosphereSettings.absorptionExtinctionMultiplier)
+    const rayleighScale = Math.max(0, baseAtmosphereSettings.rayleighScatteringMultiplier)
+    const mieScale = Math.max(0, baseAtmosphereSettings.mieExtinctionMultiplier)
+    const absorptionScale = Math.max(0, baseAtmosphereSettings.absorptionExtinctionMultiplier)
     extinctionScratch
       .copy(RAYLEIGH_EXTINCTION_BASE)
       .multiplyScalar(rayleighScale)
@@ -240,11 +240,11 @@ export const createAtmosphereRig = (
     sunTarget.updateMatrixWorld()
 
     skyTintScratch.setRGB(
-      Math.max(0, atmosphereSettings.skyTintR),
-      Math.max(0, atmosphereSettings.skyTintG),
-      Math.max(0, atmosphereSettings.skyTintB),
+      Math.max(0, baseAtmosphereSettings.skyTintR),
+      Math.max(0, baseAtmosphereSettings.skyTintG),
+      Math.max(0, baseAtmosphereSettings.skyTintB),
     )
-    skyTintScratch.multiplyScalar(Math.max(0, atmosphereSettings.skyIntensity))
+    skyTintScratch.multiplyScalar(Math.max(0, baseAtmosphereSettings.skyIntensity))
     skyTintScratch.multiplyScalar(0.15 + daylight * 0.85)
     skyTintScratch.lerp(SKY_TINT_NIGHT, Math.pow(1 - daylight, 0.6))
 
@@ -257,19 +257,18 @@ export const createAtmosphereRig = (
     ambientLight.intensity = Math.max(0, ambientIntensity * (0.1 + 0.9 * daylight))
 
     if (syncAtmosphereToSun) {
-      const skyTintStrength = THREE.MathUtils.lerp(0.3, 1, unifiedSolarStrength)
-      atmosphereSettings = {
-        ...atmosphereSettings,
-        skyIntensity: THREE.MathUtils.lerp(0.05, 3.2, unifiedSolarStrength),
-        skyTintR: skyTintScratch.r * skyTintStrength,
-        skyTintG: skyTintScratch.g * skyTintStrength,
-        skyTintB: skyTintScratch.b * skyTintStrength,
-        sunDiscIntensity: THREE.MathUtils.lerp(0, 18, unifiedSolarStrength),
-        sunDiscColorR: sunColorScratch.r,
-        sunDiscColorG: sunColorScratch.g,
-        sunDiscColorB: sunColorScratch.b,
+      const syncedAtmosphereSettings: AtmosphereSettings = {
+        ...baseAtmosphereSettings,
+        skyIntensity:
+          baseAtmosphereSettings.skyIntensity * THREE.MathUtils.lerp(0.08, 1, unifiedSolarStrength),
+        sunDiscIntensity:
+          baseAtmosphereSettings.sunDiscIntensity *
+          THREE.MathUtils.lerp(0, 1.25, unifiedSolarStrength),
+        sunDiscColorR: baseAtmosphereSettings.sunDiscColorR * sunColorScratch.r,
+        sunDiscColorG: baseAtmosphereSettings.sunDiscColorG * sunColorScratch.g,
+        sunDiscColorB: baseAtmosphereSettings.sunDiscColorB * sunColorScratch.b,
       }
-      atmosphere.setSettings(atmosphereSettings)
+      atmosphere.setSettings(syncedAtmosphereSettings)
     }
 
     atmosphere.setSunDirection(sunDirectionScratch)
@@ -298,11 +297,10 @@ export const createAtmosphereRig = (
       return
     }
 
-    const readTarget = environmentTargets[environmentReadIndex]
     const writeTarget = environmentTargets[environmentWriteIndex]
 
     const previousSceneEnvironment = scene.environment
-    scene.environment = readTarget.texture
+    scene.environment = null
 
     environmentCamera.renderTarget = writeTarget
     environmentCamera.position.copy(position)
@@ -349,8 +347,12 @@ export const createAtmosphereRig = (
   }
 
   const setAtmosphereSettings = (next: AtmosphereSettings): void => {
-    atmosphereSettings = { ...next }
-    atmosphere.setSettings(atmosphereSettings)
+    baseAtmosphereSettings = { ...next }
+    if (syncAtmosphereToSun) {
+      applyLightingAndAtmosphereFromSun()
+      return
+    }
+    atmosphere.setSettings(baseAtmosphereSettings)
     environmentDirty = true
   }
 
