@@ -2997,6 +2997,8 @@ var createAtmosphereSystem = (scene, initialSettings = DEFAULT_ATMOSPHERE_SETTIN
       clampNonNegative(settings.sunDiscColorB)
     );
     syncSunDiscUniforms();
+    material.colorNode = buildColorNode();
+    material.needsUpdate = true;
   };
   const scheduleReprime = () => {
     const activeRenderer = rendererRef;
@@ -3048,6 +3050,8 @@ var createAtmosphereSystem = (scene, initialSettings = DEFAULT_ATMOSPHERE_SETTIN
       sunScratch.normalize();
     }
     sunDirectionWorld.value.copy(sunScratch);
+    material.colorNode = buildColorNode();
+    material.needsUpdate = true;
   };
   const setCameraPosition = (positionWorld2) => {
     skyMesh.position.copy(positionWorld2);
