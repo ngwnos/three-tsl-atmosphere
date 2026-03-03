@@ -7,7 +7,7 @@ This package extracts and packages the LUT precompute + sky runtime workflow int
 ## Install
 
 ```bash
-bun add github:ngwnos/three-tsl-atmosphere
+bun add github:ngwnos/three-tsl-atmosphere#main
 ```
 
 ## Usage

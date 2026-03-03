@@ -20,7 +20,13 @@ import { getSkyLuminance } from './bruneton/runtime'
 
 export type AtmosphereSettings = {
   skyIntensity: number
+  skyTintR: number
+  skyTintG: number
+  skyTintB: number
   sunDiscIntensity: number
+  sunDiscColorR: number
+  sunDiscColorG: number
+  sunDiscColorB: number
   sunDiscInnerScale: number
   sunDiscOuterScale: number
   planetRadiusKm: number
@@ -37,7 +43,13 @@ export type AtmosphereSettings = {
 
 export const DEFAULT_ATMOSPHERE_SETTINGS: AtmosphereSettings = {
   skyIntensity: 1.2,
+  skyTintR: 1,
+  skyTintG: 1,
+  skyTintB: 1,
   sunDiscIntensity: 1.4,
+  sunDiscColorR: 1,
+  sunDiscColorG: 0.9686274509803922,
+  sunDiscColorB: 0.8901960784313725,
   sunDiscInnerScale: 0.85,
   sunDiscOuterScale: 1.8,
   planetRadiusKm: 6360,
@@ -71,8 +83,6 @@ const DEFAULT_WORLD_UNITS_PER_METER = 1
 const DEFAULT_SKY_DOME_RADIUS_METERS = 50
 const DEFAULT_REPRIME_DEBOUNCE_MS = 160
 const KM_TO_M = 1000
-
-const SUN_DISC_COLOR = new THREE.Color(0xfff7e3)
 
 const clamp01 = (value: number) => Math.min(1, Math.max(0, value))
 const clampNonNegative = (value: number) => Math.max(0, value)
@@ -141,7 +151,11 @@ export const createAtmosphereSystem = (
   const sunDirectionWorld = uniform(new THREE.Vector3(0, 1, 0))
   const worldToUnit = uniform(parameters.worldToUnit * metersPerWorldUnit)
   const skyIntensity = uniform(settings.skyIntensity)
+  const skyTint = uniform(new THREE.Vector3(settings.skyTintR, settings.skyTintG, settings.skyTintB))
   const sunDiscIntensity = uniform(settings.sunDiscIntensity)
+  const sunDiscColor = uniform(
+    new THREE.Vector3(settings.sunDiscColorR, settings.sunDiscColorG, settings.sunDiscColorB),
+  )
   const sunDiscInnerCos = uniform(0)
   const sunDiscOuterCos = uniform(0)
 
@@ -159,18 +173,16 @@ export const createAtmosphereSystem = (
       const cameraUnit = cameraPosition.sub(planetCenterWorld).mul(worldToUnit).toVar()
 
       const skyTransfer = getSkyLuminance(cameraUnit, worldViewDir, float(0), worldSunDir).toVar()
-      const skyLuminance = skyTransfer.get('luminance').mul(skyIntensity).toVar()
+      const skyLuminance = skyTransfer.get('luminance').mul(skyIntensity).mul(skyTint).toVar()
 
       const sunAlignment = dot(worldViewDir, worldSunDir).toVar()
       const sunDisc = smoothstep(sunDiscOuterCos, sunDiscInnerCos, sunAlignment)
         .mul(sunDiscIntensity)
         .toVar()
 
-      const sunDiscColor = vec3(SUN_DISC_COLOR.r, SUN_DISC_COLOR.g, SUN_DISC_COLOR.b)
-        .mul(sunDisc)
-        .toVar()
+      const sunDiscLuminance = vec3(sunDiscColor).mul(sunDisc).toVar()
 
-      return vec4(skyLuminance.add(sunDiscColor), float(1))
+      return vec4(skyLuminance.add(sunDiscLuminance), float(1))
     })().context({ atmosphere: atmosphereContext })
 
   material.colorNode = buildColorNode()
@@ -233,7 +245,17 @@ export const createAtmosphereSystem = (
 
   const applyVisualSettings = (): void => {
     skyIntensity.value = clampNonNegative(settings.skyIntensity)
+    skyTint.value.set(
+      clampNonNegative(settings.skyTintR),
+      clampNonNegative(settings.skyTintG),
+      clampNonNegative(settings.skyTintB),
+    )
     sunDiscIntensity.value = clampNonNegative(settings.sunDiscIntensity)
+    sunDiscColor.value.set(
+      clampNonNegative(settings.sunDiscColorR),
+      clampNonNegative(settings.sunDiscColorG),
+      clampNonNegative(settings.sunDiscColorB),
+    )
     syncSunDiscUniforms()
   }
 

@@ -2857,7 +2857,13 @@ var getSkyLuminance = /* @__PURE__ */ FnLayout({
 // src/atmosphereSystem.ts
 var DEFAULT_ATMOSPHERE_SETTINGS = {
   skyIntensity: 1.2,
+  skyTintR: 1,
+  skyTintG: 1,
+  skyTintB: 1,
   sunDiscIntensity: 1.4,
+  sunDiscColorR: 1,
+  sunDiscColorG: 0.9686274509803922,
+  sunDiscColorB: 0.8901960784313725,
   sunDiscInnerScale: 0.85,
   sunDiscOuterScale: 1.8,
   planetRadiusKm: 6360,
@@ -2875,7 +2881,6 @@ var DEFAULT_WORLD_UNITS_PER_METER = 1;
 var DEFAULT_SKY_DOME_RADIUS_METERS = 50;
 var DEFAULT_REPRIME_DEBOUNCE_MS = 160;
 var KM_TO_M = 1e3;
-var SUN_DISC_COLOR = new THREE.Color(16775139);
 var clamp01 = (value) => Math.min(1, Math.max(0, value));
 var clampNonNegative = (value) => Math.max(0, value);
 var lutKey = (settings) => {
@@ -2919,7 +2924,11 @@ var createAtmosphereSystem = (scene, initialSettings = DEFAULT_ATMOSPHERE_SETTIN
   const sunDirectionWorld = uniform3(new THREE.Vector3(0, 1, 0));
   const worldToUnit = uniform3(parameters.worldToUnit * metersPerWorldUnit);
   const skyIntensity = uniform3(settings.skyIntensity);
+  const skyTint = uniform3(new THREE.Vector3(settings.skyTintR, settings.skyTintG, settings.skyTintB));
   const sunDiscIntensity = uniform3(settings.sunDiscIntensity);
+  const sunDiscColor = uniform3(
+    new THREE.Vector3(settings.sunDiscColorR, settings.sunDiscColorG, settings.sunDiscColorB)
+  );
   const sunDiscInnerCos = uniform3(0);
   const sunDiscOuterCos = uniform3(0);
   const geometry = new THREE.SphereGeometry(skyDomeRadiusMeters * worldUnitsPerMeter, 64, 32);
@@ -2932,11 +2941,11 @@ var createAtmosphereSystem = (scene, initialSettings = DEFAULT_ATMOSPHERE_SETTIN
     const worldSunDir = normalize(sunDirectionWorld).toVar();
     const cameraUnit = cameraPosition.sub(planetCenterWorld).mul(worldToUnit).toVar();
     const skyTransfer = getSkyLuminance(cameraUnit, worldViewDir, float4(0), worldSunDir).toVar();
-    const skyLuminance = skyTransfer.get("luminance").mul(skyIntensity).toVar();
+    const skyLuminance = skyTransfer.get("luminance").mul(skyIntensity).mul(skyTint).toVar();
     const sunAlignment = dot(worldViewDir, worldSunDir).toVar();
     const sunDisc = smoothstep3(sunDiscOuterCos, sunDiscInnerCos, sunAlignment).mul(sunDiscIntensity).toVar();
-    const sunDiscColor = vec36(SUN_DISC_COLOR.r, SUN_DISC_COLOR.g, SUN_DISC_COLOR.b).mul(sunDisc).toVar();
-    return vec45(skyLuminance.add(sunDiscColor), float4(1));
+    const sunDiscLuminance = vec36(sunDiscColor).mul(sunDisc).toVar();
+    return vec45(skyLuminance.add(sunDiscLuminance), float4(1));
   })().context({ atmosphere: atmosphereContext });
   material.colorNode = buildColorNode();
   const skyMesh = new THREE.Mesh(geometry, material);
@@ -2976,7 +2985,17 @@ var createAtmosphereSystem = (scene, initialSettings = DEFAULT_ATMOSPHERE_SETTIN
   };
   const applyVisualSettings = () => {
     skyIntensity.value = clampNonNegative(settings.skyIntensity);
+    skyTint.value.set(
+      clampNonNegative(settings.skyTintR),
+      clampNonNegative(settings.skyTintG),
+      clampNonNegative(settings.skyTintB)
+    );
     sunDiscIntensity.value = clampNonNegative(settings.sunDiscIntensity);
+    sunDiscColor.value.set(
+      clampNonNegative(settings.sunDiscColorR),
+      clampNonNegative(settings.sunDiscColorG),
+      clampNonNegative(settings.sunDiscColorB)
+    );
     syncSunDiscUniforms();
   };
   const scheduleReprime = () => {

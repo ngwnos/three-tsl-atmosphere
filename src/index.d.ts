@@ -3,7 +3,13 @@ import type { WebGPURenderer } from 'three/webgpu'
 
 export type AtmosphereSettings = {
   skyIntensity: number
+  skyTintR: number
+  skyTintG: number
+  skyTintB: number
   sunDiscIntensity: number
+  sunDiscColorR: number
+  sunDiscColorG: number
+  sunDiscColorB: number
   sunDiscInnerScale: number
   sunDiscOuterScale: number
   planetRadiusKm: number
