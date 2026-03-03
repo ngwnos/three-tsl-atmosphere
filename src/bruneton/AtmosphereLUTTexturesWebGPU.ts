@@ -15,6 +15,7 @@ import {
   If,
   int,
   Return,
+  storageTexture,
   texture,
   textureLoad,
   texture3D,
@@ -445,6 +446,8 @@ export class AtmosphereLUTTexturesWebGPU extends AtmosphereLUTTextures {
         Return()
       })
 
+      const irradianceReadStorage = storageTexture(irradianceRead).toReadOnly()
+
       const irradiance = computeIndirectIrradianceTexture(
         texture3D(deltaRayleighScattering),
         texture3D(deltaMieScattering),
@@ -456,7 +459,7 @@ export class AtmosphereLUTTexturesWebGPU extends AtmosphereLUTTextures {
       textureStore(
         this.irradiance,
         globalId.xy,
-        textureLoad(irradianceRead, globalId.xy, int(0)).add(
+        textureLoad(irradianceReadStorage, globalId.xy).add(
           irradiance.mul(luminanceFromRadiance),
         )
       )
@@ -514,6 +517,11 @@ export class AtmosphereLUTTexturesWebGPU extends AtmosphereLUTTextures {
         Return()
       })
 
+      const scatteringReadStorage = storageTexture(scatteringRead).toReadOnly()
+      const higherOrderScatteringReadStorage = storageTexture(
+        higherOrderScatteringRead
+      ).toReadOnly()
+
       const multipleScattering = computeMultipleScatteringTexture(
         texture(
           parameters.transmittancePrecisionLog
@@ -533,14 +541,14 @@ export class AtmosphereLUTTexturesWebGPU extends AtmosphereLUTTextures {
       textureStore(
         this.scattering,
         globalId,
-        textureLoad(scatteringRead, globalId, int(0)).add(vec4(luminance, 0))
+        textureLoad(scatteringReadStorage, globalId).add(vec4(luminance, 0))
       )
       textureStore(deltaMultipleScattering, globalId, vec4(radiance, 1))
       if (parameters.higherOrderScatteringTexture) {
         textureStore(
           this.higherOrderScattering,
           globalId,
-          textureLoad(higherOrderScatteringRead, globalId, int(0)).add(
+          textureLoad(higherOrderScatteringReadStorage, globalId).add(
             vec4(luminance, 1),
           )
         )

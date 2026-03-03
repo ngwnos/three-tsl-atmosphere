@@ -430,6 +430,7 @@ import {
   If as If3,
   int,
   Return,
+  storageTexture,
   texture,
   textureLoad,
   texture3D,
@@ -2233,6 +2234,7 @@ var AtmosphereLUTTexturesWebGPU = class extends AtmosphereLUTTextures {
       If3(globalId.xy.greaterThanEqual(size).any(), () => {
         Return();
       });
+      const irradianceReadStorage = storageTexture(irradianceRead).toReadOnly();
       const irradiance = computeIndirectIrradianceTexture(
         texture3D(deltaRayleighScattering),
         texture3D(deltaMieScattering),
@@ -2243,7 +2245,7 @@ var AtmosphereLUTTexturesWebGPU = class extends AtmosphereLUTTextures {
       textureStore(
         this.irradiance,
         globalId.xy,
-        textureLoad(irradianceRead, globalId.xy, int(0)).add(
+        textureLoad(irradianceReadStorage, globalId.xy).add(
           irradiance.mul(luminanceFromRadiance)
         )
       );
@@ -2288,6 +2290,10 @@ var AtmosphereLUTTexturesWebGPU = class extends AtmosphereLUTTextures {
       If3(globalId.greaterThanEqual(size).any(), () => {
         Return();
       });
+      const scatteringReadStorage = storageTexture(scatteringRead).toReadOnly();
+      const higherOrderScatteringReadStorage = storageTexture(
+        higherOrderScatteringRead
+      ).toReadOnly();
       const multipleScattering = computeMultipleScatteringTexture(
         texture(
           parameters.transmittancePrecisionLog ? opticalDepth : this.transmittance
@@ -2301,14 +2307,14 @@ var AtmosphereLUTTexturesWebGPU = class extends AtmosphereLUTTextures {
       textureStore(
         this.scattering,
         globalId,
-        textureLoad(scatteringRead, globalId, int(0)).add(vec43(luminance, 0))
+        textureLoad(scatteringReadStorage, globalId).add(vec43(luminance, 0))
       );
       textureStore(deltaMultipleScattering, globalId, vec43(radiance, 1));
       if (parameters.higherOrderScatteringTexture) {
         textureStore(
           this.higherOrderScattering,
           globalId,
-          textureLoad(higherOrderScatteringRead, globalId, int(0)).add(
+          textureLoad(higherOrderScatteringReadStorage, globalId).add(
             vec43(luminance, 1)
           )
         );
