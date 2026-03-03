@@ -16,4 +16,7 @@ export {
   type AtmosphereEnvironmentOptions,
 } from './atmosphereRig'
 
+export { AtmosphereLight } from './AtmosphereLight'
+export { AtmosphereLightNode } from './AtmosphereLightNode'
+
 export { AtmosphereParameters } from './bruneton/AtmosphereParameters'

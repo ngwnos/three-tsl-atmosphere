@@ -36,6 +36,7 @@ export type AtmosphereSystem = {
   setSunDirection: (directionWorld: THREE.Vector3) => void
   setCameraPosition: (positionWorld: THREE.Vector3) => void
   setSkyLayer: (layer: number) => void
+  getContext: () => unknown
   dispose: () => void
 }
 
@@ -86,7 +87,7 @@ export type AtmosphereRigOptions = {
 
 export type AtmosphereRig = {
   atmosphere: AtmosphereSystem
-  sunLight: THREE.DirectionalLight
+  sunLight: AtmosphereLight
   sunTarget: THREE.Object3D
   ambientLight: THREE.HemisphereLight
   prime: (renderer: WebGPURenderer) => Promise<void>
@@ -107,5 +108,18 @@ export declare const createAtmosphereRig: (
   scene: THREE.Scene,
   options?: AtmosphereRigOptions,
 ) => AtmosphereRig
+
+export declare class AtmosphereLight extends THREE.DirectionalLight {
+  readonly type: string
+  atmosphereContext?: unknown
+  distance: number
+  direct: unknown
+  indirect: unknown
+  constructor(atmosphereContext?: unknown, distance?: number)
+}
+
+export declare class AtmosphereLightNode {
+  static readonly type: string
+}
 
 export { AtmosphereParameters } from './bruneton/AtmosphereParameters'

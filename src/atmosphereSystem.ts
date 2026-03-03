@@ -78,6 +78,7 @@ export type AtmosphereSystem = {
   setSunDirection: (directionWorld: THREE.Vector3) => void
   setCameraPosition: (positionWorld: THREE.Vector3) => void
   setSkyLayer: (layer: number) => void
+  getContext: () => AtmosphereContextNode
   dispose: () => void
 }
 
@@ -149,9 +150,7 @@ export const createAtmosphereSystem = (
   const lutNode = new AtmosphereLUTNode(parameters)
   let atmosphereContext = new AtmosphereContextNode(parameters, lutNode)
 
-  const planetCenterWorld = uniform(new THREE.Vector3())
-  const sunDirectionWorld = uniform(new THREE.Vector3(0, 1, 0))
-  const worldToUnit = uniform(parameters.worldToUnit * metersPerWorldUnit)
+  atmosphereContext.worldToUnitScene.value = parameters.worldToUnit * metersPerWorldUnit
   const skyIntensity = uniform(settings.skyIntensity)
   const skyTint = uniform(new THREE.Vector3(settings.skyTintR, settings.skyTintG, settings.skyTintB))
   const sunDiscIntensity = uniform(settings.sunDiscIntensity)
@@ -169,9 +168,12 @@ export const createAtmosphereSystem = (
   const buildColorNode = () =>
     Fn(() => {
       const worldViewDir = normalize(positionWorld.sub(cameraPosition)).toVar()
-      const worldSunDir = normalize(sunDirectionWorld).toVar()
+      const worldSunDir = normalize(atmosphereContext.sunDirectionWorld).toVar()
 
-      const cameraUnit = cameraPosition.sub(planetCenterWorld).mul(worldToUnit).toVar()
+      const cameraUnit = cameraPosition
+        .sub(atmosphereContext.planetCenterWorld)
+        .mul(atmosphereContext.worldToUnitScene)
+        .toVar()
 
       const skyTransfer = getSkyLuminance(cameraUnit, worldViewDir, float(0), worldSunDir).toVar()
       const skyLuminance = skyTransfer.get('luminance').mul(skyIntensity).mul(skyTint).toVar()
@@ -240,11 +242,13 @@ export const createAtmosphereSystem = (
 
     parameters.groundAlbedo.setScalar(clamp01(settings.groundAlbedo))
 
-    planetCenterWorld.value.set(0, -planetRadiusMeters * worldUnitsPerMeter, 0)
-
     lutNode.configure(parameters.clone())
 
+    const sunDirectionValue = atmosphereContext.sunDirectionWorld.value.clone()
     atmosphereContext = new AtmosphereContextNode(parameters.clone(), lutNode)
+    atmosphereContext.sunDirectionWorld.value.copy(sunDirectionValue)
+    atmosphereContext.planetCenterWorld.value.set(0, -planetRadiusMeters * worldUnitsPerMeter, 0)
+    atmosphereContext.worldToUnitScene.value = parameters.worldToUnit * metersPerWorldUnit
     material.colorNode = buildColorNode()
     material.needsUpdate = true
   }
@@ -320,7 +324,7 @@ export const createAtmosphereSystem = (
     } else {
       sunScratch.normalize()
     }
-    sunDirectionWorld.value.copy(sunScratch)
+    atmosphereContext.sunDirectionWorld.value.copy(sunScratch)
   }
 
   const setCameraPosition = (positionWorld: THREE.Vector3): void => {
@@ -351,6 +355,7 @@ export const createAtmosphereSystem = (
     setSunDirection,
     setCameraPosition,
     setSkyLayer,
+    getContext: () => atmosphereContext,
     dispose,
   }
 }

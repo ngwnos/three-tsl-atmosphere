@@ -11,10 +11,14 @@ import {
   normalize,
   positionWorld,
   smoothstep as smoothstep3,
-  uniform as uniform3,
+  uniform as uniform4,
   vec3 as vec36,
   vec4 as vec45
 } from "three/tsl";
+
+// src/bruneton/AtmosphereContextNode.ts
+import { Vector3 as Vector33 } from "three";
+import { uniform as uniform3 } from "three/tsl";
 
 // src/bruneton/AtmosphereContextBaseNode.ts
 import { float, vec3 } from "three/tsl";
@@ -539,6 +543,7 @@ var RadianceDensitySpectrum = "vec3";
 var Position = "vec3";
 var Direction = "vec3";
 var Luminance3 = "vec3";
+var Illuminance3 = "vec3";
 var TransmittanceTexture = "texture";
 var AbstractScatteringTexture = "texture3D";
 var ReducedScatteringTexture = "texture3D";
@@ -2590,6 +2595,9 @@ var AtmosphereContextNode = class _AtmosphereContextNode extends AtmosphereConte
     return "AtmosphereContextNode";
   }
   lutNode;
+  planetCenterWorld = uniform3(new Vector33()).setName("planetCenterWorld");
+  sunDirectionWorld = uniform3(new Vector33(0, 1, 0)).setName("sunDirectionWorld");
+  worldToUnitScene = uniform3(this.parameters.worldToUnit).setName("worldToUnitScene");
   // Static options:
   camera;
   constrainCamera = true;
@@ -2859,6 +2867,24 @@ var getSkyRadiance = /* @__PURE__ */ FnLayout({
   });
   return radianceTransferStruct(radiance, transmittance);
 });
+var getSkyIrradiance = /* @__PURE__ */ FnLayout({
+  typeOnly: true,
+  // TODO: Fn layout doesn't support texture type
+  name: "getSkyIrradiance",
+  type: IrradianceSpectrum,
+  inputs: [
+    { name: "irradianceTexture", type: IrradianceTexture },
+    { name: "point", type: Position },
+    { name: "normal", type: Direction },
+    { name: "sunDirection", type: Direction }
+  ]
+})(([irradianceTexture, point, normal, sunDirection]) => {
+  const radius = point.length().toVar();
+  const cosSun = point.dot(sunDirection).div(radius).toVar();
+  return getIrradiance(irradianceTexture, radius, cosSun).mul(
+    normal.dot(point).div(radius).add(1).mul(0.5)
+  );
+});
 var getSolarLuminance = /* @__PURE__ */ FnLayout({
   name: "getSolarLuminance",
   type: Luminance3
@@ -2911,6 +2937,27 @@ var getSkyLuminance = /* @__PURE__ */ FnLayout({
     luminance,
     radianceTransfer.get("transmittance")
   );
+});
+var getSkyIlluminance = /* @__PURE__ */ FnLayout({
+  typeOnly: true,
+  // TODO: Cannot resolve sampler uniforms
+  name: "getSkyIlluminance",
+  type: Illuminance3,
+  inputs: [
+    { name: "point", type: Position },
+    { name: "normal", type: Direction },
+    { name: "sunDirection", type: Direction }
+  ]
+})(([point, normal, sunDirection], builder) => {
+  const context = AtmosphereContextNode.get(builder);
+  const { lutNode, skyRadianceToLuminance, luminanceScale } = context;
+  const sunSkyIrradiance = getSkyIrradiance(
+    lutNode.getTextureNode("irradiance"),
+    point,
+    normal,
+    sunDirection
+  );
+  return sunSkyIrradiance.mul(skyRadianceToLuminance.mul(luminanceScale));
 });
 
 // src/atmosphereSystem.ts
@@ -2979,16 +3026,14 @@ var createAtmosphereSystem = (scene, initialSettings = DEFAULT_ATMOSPHERE_SETTIN
   const baseAbsorptionExtinction = parameters.absorptionExtinction.clone();
   const lutNode = new AtmosphereLUTNode(parameters);
   let atmosphereContext = new AtmosphereContextNode(parameters, lutNode);
-  const planetCenterWorld = uniform3(new THREE.Vector3());
-  const sunDirectionWorld = uniform3(new THREE.Vector3(0, 1, 0));
-  const worldToUnit = uniform3(parameters.worldToUnit * metersPerWorldUnit);
-  const skyIntensity = uniform3(settings.skyIntensity);
-  const skyTint = uniform3(new THREE.Vector3(settings.skyTintR, settings.skyTintG, settings.skyTintB));
-  const sunDiscIntensity = uniform3(settings.sunDiscIntensity);
-  const sunDiscColor = uniform3(
+  atmosphereContext.worldToUnitScene.value = parameters.worldToUnit * metersPerWorldUnit;
+  const skyIntensity = uniform4(settings.skyIntensity);
+  const skyTint = uniform4(new THREE.Vector3(settings.skyTintR, settings.skyTintG, settings.skyTintB));
+  const sunDiscIntensity = uniform4(settings.sunDiscIntensity);
+  const sunDiscColor = uniform4(
     new THREE.Vector3(settings.sunDiscColorR, settings.sunDiscColorG, settings.sunDiscColorB)
   );
-  const sunDiscAngularRadius = uniform3(parameters.sunAngularRadius);
+  const sunDiscAngularRadius = uniform4(parameters.sunAngularRadius);
   const geometry = new THREE.SphereGeometry(skyDomeRadiusMeters * worldUnitsPerMeter, 64, 32);
   const material = new MeshBasicNodeMaterial();
   material.side = THREE.BackSide;
@@ -2996,8 +3041,8 @@ var createAtmosphereSystem = (scene, initialSettings = DEFAULT_ATMOSPHERE_SETTIN
   material.depthWrite = false;
   const buildColorNode = () => Fn4(() => {
     const worldViewDir = normalize(positionWorld.sub(cameraPosition)).toVar();
-    const worldSunDir = normalize(sunDirectionWorld).toVar();
-    const cameraUnit = cameraPosition.sub(planetCenterWorld).mul(worldToUnit).toVar();
+    const worldSunDir = normalize(atmosphereContext.sunDirectionWorld).toVar();
+    const cameraUnit = cameraPosition.sub(atmosphereContext.planetCenterWorld).mul(atmosphereContext.worldToUnitScene).toVar();
     const skyTransfer = getSkyLuminance(cameraUnit, worldViewDir, float4(0), worldSunDir).toVar();
     const skyLuminance = skyTransfer.get("luminance").mul(skyIntensity).mul(skyTint).toVar();
     const sunChordThreshold = cos2(sunDiscAngularRadius).oneMinus().mul(2).toVar();
@@ -3037,9 +3082,12 @@ var createAtmosphereSystem = (scene, initialSettings = DEFAULT_ATMOSPHERE_SETTIN
     parameters.mieExtinction.copy(baseMieExtinction).multiplyScalar(clampNonNegative(settings.mieExtinctionMultiplier));
     parameters.absorptionExtinction.copy(baseAbsorptionExtinction).multiplyScalar(clampNonNegative(settings.absorptionExtinctionMultiplier));
     parameters.groundAlbedo.setScalar(clamp01(settings.groundAlbedo));
-    planetCenterWorld.value.set(0, -planetRadiusMeters * worldUnitsPerMeter, 0);
     lutNode.configure(parameters.clone());
+    const sunDirectionValue = atmosphereContext.sunDirectionWorld.value.clone();
     atmosphereContext = new AtmosphereContextNode(parameters.clone(), lutNode);
+    atmosphereContext.sunDirectionWorld.value.copy(sunDirectionValue);
+    atmosphereContext.planetCenterWorld.value.set(0, -planetRadiusMeters * worldUnitsPerMeter, 0);
+    atmosphereContext.worldToUnitScene.value = parameters.worldToUnit * metersPerWorldUnit;
     material.colorNode = buildColorNode();
     material.needsUpdate = true;
   };
@@ -3107,10 +3155,10 @@ var createAtmosphereSystem = (scene, initialSettings = DEFAULT_ATMOSPHERE_SETTIN
     } else {
       sunScratch.normalize();
     }
-    sunDirectionWorld.value.copy(sunScratch);
+    atmosphereContext.sunDirectionWorld.value.copy(sunScratch);
   };
-  const setCameraPosition = (positionWorld2) => {
-    skyMesh.position.copy(positionWorld2);
+  const setCameraPosition = (positionWorld3) => {
+    skyMesh.position.copy(positionWorld3);
   };
   const setSkyLayer = (layer) => {
     const clampedLayer = THREE.MathUtils.clamp(Math.floor(layer), 0, 31);
@@ -3133,12 +3181,110 @@ var createAtmosphereSystem = (scene, initialSettings = DEFAULT_ATMOSPHERE_SETTIN
     setSunDirection,
     setCameraPosition,
     setSkyLayer,
+    getContext: () => atmosphereContext,
     dispose
   };
 };
 
 // src/atmosphereRig.ts
 import * as THREE2 from "three";
+
+// src/AtmosphereLight.ts
+import { DirectionalLight } from "three";
+import { uniform as uniform5 } from "three/tsl";
+var AtmosphereLight = class extends DirectionalLight {
+  type = "AtmosphereLight";
+  atmosphereContext;
+  // Distance from target along the world sun direction.
+  distance;
+  direct = uniform5(true);
+  indirect = uniform5(true);
+  constructor(atmosphereContext, distance = 1) {
+    super();
+    this.atmosphereContext = atmosphereContext;
+    this.distance = distance;
+  }
+  updateMatrixWorld(force) {
+    this.updatePosition();
+    super.updateMatrixWorld(force);
+  }
+  updatePosition() {
+    if (!this.atmosphereContext) {
+      return;
+    }
+    this.position.copy(this.atmosphereContext.sunDirectionWorld.value).multiplyScalar(this.distance).add(this.target.position);
+    super.updateMatrixWorld(true);
+    this.target.updateMatrixWorld(true);
+  }
+  copy(source, recursive) {
+    super.copy(source, recursive);
+    this.atmosphereContext = source.atmosphereContext;
+    this.distance = source.distance;
+    return this;
+  }
+};
+
+// src/AtmosphereLightNode.ts
+import {
+  cameraViewMatrix,
+  Fn as Fn5,
+  normalWorld,
+  positionWorld as positionWorld2,
+  select as select4,
+  vec4 as vec46
+} from "three/tsl";
+import { AnalyticLightNode } from "three/webgpu";
+var AtmosphereLightNode = class extends AnalyticLightNode {
+  static get type() {
+    return "AtmosphereLightNode";
+  }
+  setupDirect(builder) {
+    if (!this.light) {
+      return;
+    }
+    const { atmosphereContext } = this.light;
+    if (!atmosphereContext) {
+      return;
+    }
+    const { direct, indirect } = this.light;
+    const {
+      worldToUnitScene,
+      planetCenterWorld,
+      solarIrradiance,
+      sunRadianceToLuminance,
+      luminanceScale,
+      sunDirectionWorld
+    } = atmosphereContext;
+    const positionUnit = positionWorld2.sub(planetCenterWorld).mul(worldToUnitScene).toVar();
+    const normalUnit = normalWorld;
+    const skyIlluminance = Fn5((contextBuilder) => {
+      contextBuilder.getContext().atmosphere = atmosphereContext;
+      return getSkyIlluminance(positionUnit, normalUnit, sunDirectionWorld).mul(
+        select4(indirect, 1, 0)
+      );
+    })();
+    const lightingContext = builder.getContext();
+    lightingContext.irradiance.addAssign(skyIlluminance);
+    const sunDirectionView = cameraViewMatrix.mul(vec46(sunDirectionWorld, 0)).xyz;
+    const radius = positionUnit.length().toVar();
+    const cosSun = positionUnit.dot(sunDirectionWorld).div(radius);
+    const sunTransmittance = Fn5((contextBuilder) => {
+      contextBuilder.getContext().atmosphere = atmosphereContext;
+      return getTransmittanceToSun(
+        atmosphereContext.lutNode.getTextureNode("transmittance"),
+        radius,
+        cosSun
+      );
+    })();
+    const sunLuminance = solarIrradiance.mul(sunTransmittance).mul(sunRadianceToLuminance.mul(luminanceScale)).mul(select4(direct, 1, 0));
+    return {
+      lightDirection: sunDirectionView,
+      lightColor: sunLuminance.mul(this.colorNode)
+    };
+  }
+};
+
+// src/atmosphereRig.ts
 var DEFAULT_SKY_LAYER = 1;
 var DEFAULT_SUN_DISTANCE = 5;
 var DEFAULT_SUN_INTENSITY = 1;
@@ -3147,12 +3293,8 @@ var DEFAULT_AMBIENT_INTENSITY = 0.35;
 var DEFAULT_ENVIRONMENT_RESOLUTION = 256;
 var DEFAULT_ENVIRONMENT_NEAR = 0.1;
 var DEFAULT_ENVIRONMENT_FAR = 250;
-var SKY_TINT_NIGHT = new THREE2.Color(725794);
-var AMBIENT_GROUND_NIGHT = new THREE2.Color(1713464);
-var AMBIENT_GROUND_DAY = new THREE2.Color(4865069);
-var RAYLEIGH_EXTINCTION_BASE = new THREE2.Vector3(0.06, 0.12, 0.24);
-var MIE_EXTINCTION_BASE = new THREE2.Vector3(0.015, 0.015, 0.015);
-var ABSORPTION_EXTINCTION_BASE = new THREE2.Vector3(3e-3, 0.02, 2e-3);
+var DEFAULT_AMBIENT_SKY_COLOR = new THREE2.Color(16777215);
+var DEFAULT_AMBIENT_GROUND_COLOR = new THREE2.Color(4865069);
 var createEnvironmentTarget = (resolution) => {
   const target = new THREE2.WebGLCubeRenderTarget(resolution, {
     type: THREE2.HalfFloatType,
@@ -3163,10 +3305,27 @@ var createEnvironmentTarget = (resolution) => {
   target.texture.colorSpace = THREE2.LinearSRGBColorSpace;
   return target;
 };
-var computeAirMass = (altitudeDeg) => {
-  const zenithDegrees = THREE2.MathUtils.clamp(90 - altitudeDeg, 0, 89.9);
-  const cosZenith = Math.cos(THREE2.MathUtils.degToRad(zenithDegrees));
-  return 1 / Math.max(0.03, cosZenith + 0.15 * Math.pow(Math.max(0.01, 93.885 - zenithDegrees), -1.253));
+var getRendererLightNodeLibrary = (renderer) => {
+  const maybeRenderer = renderer;
+  const library = maybeRenderer.library;
+  if (!library || typeof library !== "object") {
+    return null;
+  }
+  const lightLibrary = library;
+  if (typeof lightLibrary.getLightNodeClass !== "function" || typeof lightLibrary.addLight !== "function") {
+    return null;
+  }
+  return lightLibrary;
+};
+var ensureAtmosphereLightNodeRegistered = (renderer) => {
+  const lightLibrary = getRendererLightNodeLibrary(renderer);
+  if (!lightLibrary) {
+    return;
+  }
+  if (lightLibrary.getLightNodeClass(AtmosphereLight)) {
+    return;
+  }
+  lightLibrary.addLight(AtmosphereLightNode, AtmosphereLight);
 };
 var createAtmosphereRig = (scene, options = {}) => {
   let baseAtmosphereSettings = {
@@ -3189,12 +3348,14 @@ var createAtmosphereRig = (scene, options = {}) => {
   atmosphere.setSkyLayer(skyLayer);
   const sunTarget = new THREE2.Object3D();
   scene.add(sunTarget);
-  const sunLight = new THREE2.DirectionalLight(16777215, DEFAULT_SUN_INTENSITY);
+  const sunLight = new AtmosphereLight(atmosphere.getContext(), sunDistance);
   sunLight.target = sunTarget;
+  sunLight.color.set(16777215);
+  sunLight.intensity = DEFAULT_SUN_INTENSITY;
   scene.add(sunLight);
   const ambientLight = new THREE2.HemisphereLight(
-    16777215,
-    AMBIENT_GROUND_DAY.getHex(),
+    DEFAULT_AMBIENT_SKY_COLOR.getHex(),
+    DEFAULT_AMBIENT_GROUND_COLOR.getHex(),
     DEFAULT_AMBIENT_INTENSITY
   );
   scene.add(ambientLight);
@@ -3231,10 +3392,6 @@ var createAtmosphereRig = (scene, options = {}) => {
     }
   }
   const sunDirectionScratch = new THREE2.Vector3(0, 1, 0);
-  const sunColorScratch = new THREE2.Color();
-  const skyTintScratch = new THREE2.Color();
-  const ambientGroundScratch = new THREE2.Color();
-  const extinctionScratch = new THREE2.Vector3();
   const capturePositionScratch = new THREE2.Vector3(0, 0, 0);
   let ambientIntensity = Number.isFinite(options.ambientIntensity) && (options.ambientIntensity ?? -1) >= 0 ? options.ambientIntensity : DEFAULT_AMBIENT_INTENSITY;
   let sunState = {
@@ -3242,61 +3399,31 @@ var createAtmosphereRig = (scene, options = {}) => {
     azimuthDeg: options.sun?.azimuthDeg ?? 0,
     intensity: Math.max(0, options.sun?.intensity ?? DEFAULT_SUN_INTENSITY)
   };
-  let rendererRef = null;
   let environmentDirty = true;
-  const applyLightingAndAtmosphereFromSun = () => {
-    const altitudeRadians = THREE2.MathUtils.degToRad(sunState.altitudeDeg);
-    const daylight = THREE2.MathUtils.clamp(Math.sin(altitudeRadians) * 0.5 + 0.5, 0, 1);
-    const solarVisibility = THREE2.MathUtils.smoothstep(sunState.altitudeDeg, -8, 2);
-    const normalizedSunStrength = THREE2.MathUtils.clamp(
-      sunState.intensity / maxSunIntensity,
-      0,
-      1
-    );
+  const syncSunState = () => {
     sunDirectionFromAngles(
       sunState.altitudeDeg,
       sunState.azimuthDeg,
       sunDirectionScratch
     );
-    const rayleighScale = Math.max(0, baseAtmosphereSettings.rayleighScatteringMultiplier);
-    const mieScale = Math.max(0, baseAtmosphereSettings.mieExtinctionMultiplier);
-    const absorptionScale = Math.max(0, baseAtmosphereSettings.absorptionExtinctionMultiplier);
-    extinctionScratch.copy(RAYLEIGH_EXTINCTION_BASE).multiplyScalar(rayleighScale).addScaledVector(MIE_EXTINCTION_BASE, mieScale).addScaledVector(ABSORPTION_EXTINCTION_BASE, absorptionScale).multiplyScalar(computeAirMass(sunState.altitudeDeg));
-    sunColorScratch.setRGB(
-      Math.exp(-extinctionScratch.x),
-      Math.exp(-extinctionScratch.y),
-      Math.exp(-extinctionScratch.z)
-    );
-    sunLight.color.copy(sunColorScratch);
-    sunLight.intensity = Math.max(0, sunState.intensity * solarVisibility);
-    sunLight.position.copy(sunDirectionScratch).multiplyScalar(sunDistance);
-    sunTarget.position.set(0, 0, 0);
-    sunTarget.updateMatrixWorld();
-    skyTintScratch.setRGB(
-      Math.max(0, baseAtmosphereSettings.skyTintR),
-      Math.max(0, baseAtmosphereSettings.skyTintG),
-      Math.max(0, baseAtmosphereSettings.skyTintB)
-    );
-    skyTintScratch.multiplyScalar(Math.max(0, baseAtmosphereSettings.skyIntensity));
-    skyTintScratch.multiplyScalar(0.15 + daylight * 0.85);
-    skyTintScratch.lerp(SKY_TINT_NIGHT, Math.pow(1 - daylight, 0.6));
-    ambientGroundScratch.copy(AMBIENT_GROUND_NIGHT).lerp(AMBIENT_GROUND_DAY, Math.pow(daylight, 0.4));
-    ambientLight.color.copy(skyTintScratch).multiplyScalar(0.7 + daylight * 0.3);
-    ambientLight.groundColor.copy(ambientGroundScratch);
-    ambientLight.intensity = Math.max(0, ambientIntensity * (0.1 + 0.9 * daylight));
+    let atmosphereSettings = baseAtmosphereSettings;
     if (syncAtmosphereToSun) {
-      const solarScale = normalizedSunStrength;
-      const syncedAtmosphereSettings = {
+      const sunScale = THREE2.MathUtils.clamp(sunState.intensity / maxSunIntensity, 0, 1);
+      atmosphereSettings = {
         ...baseAtmosphereSettings,
-        skyIntensity: baseAtmosphereSettings.skyIntensity * solarScale,
-        sunDiscIntensity: baseAtmosphereSettings.sunDiscIntensity * solarScale,
-        sunDiscColorR: baseAtmosphereSettings.sunDiscColorR,
-        sunDiscColorG: baseAtmosphereSettings.sunDiscColorG,
-        sunDiscColorB: baseAtmosphereSettings.sunDiscColorB
+        skyIntensity: baseAtmosphereSettings.skyIntensity * sunScale,
+        sunDiscIntensity: baseAtmosphereSettings.sunDiscIntensity * sunScale
       };
-      atmosphere.setSettings(syncedAtmosphereSettings);
+      atmosphere.setSettings(atmosphereSettings);
     }
+    sunLight.atmosphereContext = atmosphere.getContext();
     atmosphere.setSunDirection(sunDirectionScratch);
+    sunLight.color.set(16777215);
+    sunLight.intensity = Math.max(0, sunState.intensity);
+    sunTarget.position.set(0, 0, 0);
+    sunLight.updateMatrixWorld(true);
+    sunTarget.updateMatrixWorld();
+    ambientLight.intensity = Math.max(0, ambientIntensity);
     environmentDirty = true;
   };
   const setSun = (next) => {
@@ -3305,7 +3432,7 @@ var createAtmosphereRig = (scene, options = {}) => {
       azimuthDeg: typeof next.azimuthDeg === "number" ? next.azimuthDeg : sunState.azimuthDeg,
       intensity: typeof next.intensity === "number" ? Math.max(0, next.intensity) : sunState.intensity
     };
-    applyLightingAndAtmosphereFromSun();
+    syncSunState();
   };
   const captureEnvironment = (renderer, position = capturePositionScratch) => {
     if (!environmentEnabled || !environmentCamera || !environmentTargets) {
@@ -3322,12 +3449,12 @@ var createAtmosphereRig = (scene, options = {}) => {
     scene.environment = environmentApplyToScene ? environmentTargets[environmentReadIndex].texture : previousSceneEnvironment;
     environmentDirty = false;
   };
-  const setCameraPosition = (positionWorld2) => {
-    atmosphere.setCameraPosition(positionWorld2);
-    capturePositionScratch.copy(positionWorld2);
+  const setCameraPosition = (positionWorld3) => {
+    atmosphere.setCameraPosition(positionWorld3);
+    capturePositionScratch.copy(positionWorld3);
   };
   const update = (renderer, camera) => {
-    rendererRef = renderer;
+    ensureAtmosphereLightNodeRegistered(renderer);
     if (camera) {
       setCameraPosition(camera.position);
     }
@@ -3342,8 +3469,9 @@ var createAtmosphereRig = (scene, options = {}) => {
     environmentDirty = true;
   };
   const prime = async (renderer) => {
-    rendererRef = renderer;
+    ensureAtmosphereLightNodeRegistered(renderer);
     await atmosphere.prime(renderer);
+    syncSunState();
     if (environmentEnabled && environmentCaptureOnPrime) {
       captureEnvironment(renderer, capturePositionScratch);
     }
@@ -3351,10 +3479,12 @@ var createAtmosphereRig = (scene, options = {}) => {
   const setAtmosphereSettings = (next) => {
     baseAtmosphereSettings = { ...next };
     if (syncAtmosphereToSun) {
-      applyLightingAndAtmosphereFromSun();
+      syncSunState();
       return;
     }
     atmosphere.setSettings(baseAtmosphereSettings);
+    sunLight.atmosphereContext = atmosphere.getContext();
+    atmosphere.setSunDirection(sunDirectionScratch);
     environmentDirty = true;
   };
   const setAmbientIntensity = (next) => {
@@ -3386,9 +3516,8 @@ var createAtmosphereRig = (scene, options = {}) => {
         scene.environment = null;
       }
     }
-    rendererRef = null;
   };
-  applyLightingAndAtmosphereFromSun();
+  syncSunState();
   return {
     atmosphere,
     sunLight,
@@ -3413,6 +3542,8 @@ var createAtmosphereRig = (scene, options = {}) => {
   };
 };
 export {
+  AtmosphereLight,
+  AtmosphereLightNode,
   AtmosphereParameters,
   DEFAULT_ATMOSPHERE_SETTINGS,
   createAtmosphereRig,

@@ -1,6 +1,8 @@
 import * as THREE from 'three'
 import type { WebGPURenderer } from 'three/webgpu'
 
+import { AtmosphereLight } from './AtmosphereLight'
+import { AtmosphereLightNode } from './AtmosphereLightNode'
 import {
   createAtmosphereSystem,
   DEFAULT_ATMOSPHERE_SETTINGS,
@@ -43,7 +45,7 @@ export type AtmosphereRigOptions = {
 
 export type AtmosphereRig = {
   atmosphere: AtmosphereSystem
-  sunLight: THREE.DirectionalLight
+  sunLight: AtmosphereLight
   sunTarget: THREE.Object3D
   ambientLight: THREE.HemisphereLight
   prime: (renderer: WebGPURenderer) => Promise<void>
@@ -60,6 +62,14 @@ export type AtmosphereRig = {
   dispose: () => void
 }
 
+type LightNodeLibrary = {
+  getLightNodeClass: (lightClass: new (...args: never[]) => unknown) => unknown
+  addLight: (
+    lightNodeClass: new (...args: never[]) => unknown,
+    lightClass: new (...args: never[]) => unknown,
+  ) => void
+}
+
 const DEFAULT_SKY_LAYER = 1
 const DEFAULT_SUN_DISTANCE = 5
 const DEFAULT_SUN_INTENSITY = 1
@@ -69,12 +79,8 @@ const DEFAULT_ENVIRONMENT_RESOLUTION = 256
 const DEFAULT_ENVIRONMENT_NEAR = 0.1
 const DEFAULT_ENVIRONMENT_FAR = 250
 
-const SKY_TINT_NIGHT = new THREE.Color(0x0b1322)
-const AMBIENT_GROUND_NIGHT = new THREE.Color(0x1a2538)
-const AMBIENT_GROUND_DAY = new THREE.Color(0x4a3c2d)
-const RAYLEIGH_EXTINCTION_BASE = new THREE.Vector3(0.06, 0.12, 0.24)
-const MIE_EXTINCTION_BASE = new THREE.Vector3(0.015, 0.015, 0.015)
-const ABSORPTION_EXTINCTION_BASE = new THREE.Vector3(0.003, 0.02, 0.002)
+const DEFAULT_AMBIENT_SKY_COLOR = new THREE.Color(0xffffff)
+const DEFAULT_AMBIENT_GROUND_COLOR = new THREE.Color(0x4a3c2d)
 
 const createEnvironmentTarget = (resolution: number): THREE.WebGLCubeRenderTarget => {
   const target = new THREE.WebGLCubeRenderTarget(resolution, {
@@ -87,10 +93,31 @@ const createEnvironmentTarget = (resolution: number): THREE.WebGLCubeRenderTarge
   return target
 }
 
-const computeAirMass = (altitudeDeg: number): number => {
-  const zenithDegrees = THREE.MathUtils.clamp(90 - altitudeDeg, 0, 89.9)
-  const cosZenith = Math.cos(THREE.MathUtils.degToRad(zenithDegrees))
-  return 1 / Math.max(0.03, cosZenith + 0.15 * Math.pow(Math.max(0.01, 93.885 - zenithDegrees), -1.253))
+const getRendererLightNodeLibrary = (renderer: WebGPURenderer): LightNodeLibrary | null => {
+  const maybeRenderer = renderer as unknown as { library?: unknown }
+  const library = maybeRenderer.library
+  if (!library || typeof library !== 'object') {
+    return null
+  }
+  const lightLibrary = library as Partial<LightNodeLibrary>
+  if (
+    typeof lightLibrary.getLightNodeClass !== 'function' ||
+    typeof lightLibrary.addLight !== 'function'
+  ) {
+    return null
+  }
+  return lightLibrary as LightNodeLibrary
+}
+
+const ensureAtmosphereLightNodeRegistered = (renderer: WebGPURenderer): void => {
+  const lightLibrary = getRendererLightNodeLibrary(renderer)
+  if (!lightLibrary) {
+    return
+  }
+  if (lightLibrary.getLightNodeClass(AtmosphereLight)) {
+    return
+  }
+  lightLibrary.addLight(AtmosphereLightNode, AtmosphereLight)
 }
 
 export const createAtmosphereRig = (
@@ -127,13 +154,15 @@ export const createAtmosphereRig = (
   const sunTarget = new THREE.Object3D()
   scene.add(sunTarget)
 
-  const sunLight = new THREE.DirectionalLight(0xffffff, DEFAULT_SUN_INTENSITY)
+  const sunLight = new AtmosphereLight(atmosphere.getContext(), sunDistance)
   sunLight.target = sunTarget
+  sunLight.color.set(0xffffff)
+  sunLight.intensity = DEFAULT_SUN_INTENSITY
   scene.add(sunLight)
 
   const ambientLight = new THREE.HemisphereLight(
-    0xffffff,
-    AMBIENT_GROUND_DAY.getHex(),
+    DEFAULT_AMBIENT_SKY_COLOR.getHex(),
+    DEFAULT_AMBIENT_GROUND_COLOR.getHex(),
     DEFAULT_AMBIENT_INTENSITY,
   )
   scene.add(ambientLight)
@@ -180,10 +209,6 @@ export const createAtmosphereRig = (
   }
 
   const sunDirectionScratch = new THREE.Vector3(0, 1, 0)
-  const sunColorScratch = new THREE.Color()
-  const skyTintScratch = new THREE.Color()
-  const ambientGroundScratch = new THREE.Color()
-  const extinctionScratch = new THREE.Vector3()
   const capturePositionScratch = new THREE.Vector3(0, 0, 0)
 
   let ambientIntensity =
@@ -197,78 +222,36 @@ export const createAtmosphereRig = (
     intensity: Math.max(0, options.sun?.intensity ?? DEFAULT_SUN_INTENSITY),
   }
 
-  let rendererRef: WebGPURenderer | null = null
   let environmentDirty = true
 
-  const applyLightingAndAtmosphereFromSun = (): void => {
-    const altitudeRadians = THREE.MathUtils.degToRad(sunState.altitudeDeg)
-    const daylight = THREE.MathUtils.clamp(Math.sin(altitudeRadians) * 0.5 + 0.5, 0, 1)
-    const solarVisibility = THREE.MathUtils.smoothstep(sunState.altitudeDeg, -8, 2)
-    const normalizedSunStrength = THREE.MathUtils.clamp(
-      sunState.intensity / maxSunIntensity,
-      0,
-      1,
-    )
-
+  const syncSunState = (): void => {
     sunDirectionFromAngles(
       sunState.altitudeDeg,
       sunState.azimuthDeg,
       sunDirectionScratch,
     )
 
-    const rayleighScale = Math.max(0, baseAtmosphereSettings.rayleighScatteringMultiplier)
-    const mieScale = Math.max(0, baseAtmosphereSettings.mieExtinctionMultiplier)
-    const absorptionScale = Math.max(0, baseAtmosphereSettings.absorptionExtinctionMultiplier)
-    extinctionScratch
-      .copy(RAYLEIGH_EXTINCTION_BASE)
-      .multiplyScalar(rayleighScale)
-      .addScaledVector(MIE_EXTINCTION_BASE, mieScale)
-      .addScaledVector(ABSORPTION_EXTINCTION_BASE, absorptionScale)
-      .multiplyScalar(computeAirMass(sunState.altitudeDeg))
-
-    sunColorScratch.setRGB(
-      Math.exp(-extinctionScratch.x),
-      Math.exp(-extinctionScratch.y),
-      Math.exp(-extinctionScratch.z),
-    )
-
-    sunLight.color.copy(sunColorScratch)
-    sunLight.intensity = Math.max(0, sunState.intensity * solarVisibility)
-    sunLight.position.copy(sunDirectionScratch).multiplyScalar(sunDistance)
-    sunTarget.position.set(0, 0, 0)
-    sunTarget.updateMatrixWorld()
-
-    skyTintScratch.setRGB(
-      Math.max(0, baseAtmosphereSettings.skyTintR),
-      Math.max(0, baseAtmosphereSettings.skyTintG),
-      Math.max(0, baseAtmosphereSettings.skyTintB),
-    )
-    skyTintScratch.multiplyScalar(Math.max(0, baseAtmosphereSettings.skyIntensity))
-    skyTintScratch.multiplyScalar(0.15 + daylight * 0.85)
-    skyTintScratch.lerp(SKY_TINT_NIGHT, Math.pow(1 - daylight, 0.6))
-
-    ambientGroundScratch
-      .copy(AMBIENT_GROUND_NIGHT)
-      .lerp(AMBIENT_GROUND_DAY, Math.pow(daylight, 0.4))
-
-    ambientLight.color.copy(skyTintScratch).multiplyScalar(0.7 + daylight * 0.3)
-    ambientLight.groundColor.copy(ambientGroundScratch)
-    ambientLight.intensity = Math.max(0, ambientIntensity * (0.1 + 0.9 * daylight))
-
+    let atmosphereSettings = baseAtmosphereSettings
     if (syncAtmosphereToSun) {
-      const solarScale = normalizedSunStrength
-      const syncedAtmosphereSettings: AtmosphereSettings = {
+      const sunScale = THREE.MathUtils.clamp(sunState.intensity / maxSunIntensity, 0, 1)
+      atmosphereSettings = {
         ...baseAtmosphereSettings,
-        skyIntensity: baseAtmosphereSettings.skyIntensity * solarScale,
-        sunDiscIntensity: baseAtmosphereSettings.sunDiscIntensity * solarScale,
-        sunDiscColorR: baseAtmosphereSettings.sunDiscColorR,
-        sunDiscColorG: baseAtmosphereSettings.sunDiscColorG,
-        sunDiscColorB: baseAtmosphereSettings.sunDiscColorB,
+        skyIntensity: baseAtmosphereSettings.skyIntensity * sunScale,
+        sunDiscIntensity: baseAtmosphereSettings.sunDiscIntensity * sunScale,
       }
-      atmosphere.setSettings(syncedAtmosphereSettings)
+      atmosphere.setSettings(atmosphereSettings)
     }
 
+    sunLight.atmosphereContext = atmosphere.getContext()
     atmosphere.setSunDirection(sunDirectionScratch)
+
+    sunLight.color.set(0xffffff)
+    sunLight.intensity = Math.max(0, sunState.intensity)
+    sunTarget.position.set(0, 0, 0)
+    sunLight.updateMatrixWorld(true)
+    sunTarget.updateMatrixWorld()
+
+    ambientLight.intensity = Math.max(0, ambientIntensity)
     environmentDirty = true
   }
 
@@ -283,7 +266,7 @@ export const createAtmosphereRig = (
           ? Math.max(0, next.intensity)
           : sunState.intensity,
     }
-    applyLightingAndAtmosphereFromSun()
+    syncSunState()
   }
 
   const captureEnvironment = (
@@ -319,7 +302,7 @@ export const createAtmosphereRig = (
   }
 
   const update = (renderer: WebGPURenderer, camera?: THREE.Camera | null): void => {
-    rendererRef = renderer
+    ensureAtmosphereLightNodeRegistered(renderer)
     if (camera) {
       setCameraPosition(camera.position)
     }
@@ -336,8 +319,9 @@ export const createAtmosphereRig = (
   }
 
   const prime = async (renderer: WebGPURenderer): Promise<void> => {
-    rendererRef = renderer
+    ensureAtmosphereLightNodeRegistered(renderer)
     await atmosphere.prime(renderer)
+    syncSunState()
     if (environmentEnabled && environmentCaptureOnPrime) {
       captureEnvironment(renderer, capturePositionScratch)
     }
@@ -346,10 +330,12 @@ export const createAtmosphereRig = (
   const setAtmosphereSettings = (next: AtmosphereSettings): void => {
     baseAtmosphereSettings = { ...next }
     if (syncAtmosphereToSun) {
-      applyLightingAndAtmosphereFromSun()
+      syncSunState()
       return
     }
     atmosphere.setSettings(baseAtmosphereSettings)
+    sunLight.atmosphereContext = atmosphere.getContext()
+    atmosphere.setSunDirection(sunDirectionScratch)
     environmentDirty = true
   }
 
@@ -386,11 +372,9 @@ export const createAtmosphereRig = (
         scene.environment = null
       }
     }
-
-    rendererRef = null
   }
 
-  applyLightingAndAtmosphereFromSun()
+  syncSunState()
 
   return {
     atmosphere,

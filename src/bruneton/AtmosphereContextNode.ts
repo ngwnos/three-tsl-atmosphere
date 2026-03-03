@@ -1,4 +1,5 @@
-import type { Camera } from 'three'
+import { Vector3, type Camera } from 'three'
+import { uniform } from 'three/tsl'
 import type { NodeBuilder } from 'three/webgpu'
 
 import { AtmosphereContextBaseNode } from './AtmosphereContextBaseNode'
@@ -11,6 +12,10 @@ export class AtmosphereContextNode extends AtmosphereContextBaseNode {
   }
 
   lutNode: AtmosphereLUTNode
+
+  planetCenterWorld = uniform(new Vector3()).setName('planetCenterWorld')
+  sunDirectionWorld = uniform(new Vector3(0, 1, 0)).setName('sunDirectionWorld')
+  worldToUnitScene = uniform(this.parameters.worldToUnit).setName('worldToUnitScene')
 
   // Static options:
   camera?: Camera
@@ -38,4 +43,3 @@ export class AtmosphereContextNode extends AtmosphereContextBaseNode {
     super.dispose()
   }
 }
-
