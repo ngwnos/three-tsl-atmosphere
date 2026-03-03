@@ -107,6 +107,20 @@ export function setupStorageTexture(
   texture.image.height = size.y
 }
 
+export function setupReadTexture(
+  texture: DataTexture,
+  textureType: AnyFloatType,
+  size: Vector2
+): void {
+  texture.type = textureType
+  reinterpretType<DataTextureImageData>(texture.image)
+  texture.image.width = size.x
+  texture.image.height = size.y
+  // Keep this as a GPU copy destination/source without CPU upload.
+  texture.source.dataReady = false
+  texture.needsUpdate = true
+}
+
 export function setupStorage3DTexture(
   texture: Storage3DTexture,
   textureType: AnyFloatType,
@@ -117,6 +131,21 @@ export function setupStorage3DTexture(
   texture.image.width = size.x
   texture.image.height = size.y
   texture.image.depth = size.z
+}
+
+export function setupRead3DTexture(
+  texture: Data3DTexture,
+  textureType: AnyFloatType,
+  size: Vector3
+): void {
+  texture.type = textureType
+  reinterpretType<Data3DTextureImageData>(texture.image)
+  texture.image.width = size.x
+  texture.image.height = size.y
+  texture.image.depth = size.z
+  // Keep this as a GPU copy destination/source without CPU upload.
+  texture.source.dataReady = false
+  texture.needsUpdate = true
 }
 
 class AtmosphereLUTTexturesContextWebGPU extends AtmosphereLUTTexturesContext {
@@ -168,17 +197,17 @@ class AtmosphereLUTTexturesContextWebGPU extends AtmosphereLUTTexturesContext {
       parameters.scatteringTextureSize
     )
 
-    setupStorageTexture(
+    setupReadTexture(
       this.irradianceRead,
       textureType,
       parameters.irradianceTextureSize
     )
-    setupStorage3DTexture(
+    setupRead3DTexture(
       this.scatteringRead,
       textureType,
       parameters.scatteringTextureSize
     )
-    setupStorage3DTexture(
+    setupRead3DTexture(
       this.higherOrderScatteringRead,
       textureType,
       parameters.scatteringTextureSize

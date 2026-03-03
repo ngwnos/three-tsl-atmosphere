@@ -1975,12 +1975,29 @@ function setupStorageTexture(texture2, textureType, size) {
   texture2.image.width = size.x;
   texture2.image.height = size.y;
 }
+function setupReadTexture(texture2, textureType, size) {
+  texture2.type = textureType;
+  reinterpretType(texture2.image);
+  texture2.image.width = size.x;
+  texture2.image.height = size.y;
+  texture2.source.dataReady = false;
+  texture2.needsUpdate = true;
+}
 function setupStorage3DTexture(texture2, textureType, size) {
   texture2.type = textureType;
   reinterpretType(texture2.image);
   texture2.image.width = size.x;
   texture2.image.height = size.y;
   texture2.image.depth = size.z;
+}
+function setupRead3DTexture(texture2, textureType, size) {
+  texture2.type = textureType;
+  reinterpretType(texture2.image);
+  texture2.image.width = size.x;
+  texture2.image.height = size.y;
+  texture2.image.depth = size.z;
+  texture2.source.dataReady = false;
+  texture2.needsUpdate = true;
 }
 var AtmosphereLUTTexturesContextWebGPU = class extends AtmosphereLUTTexturesContext {
   opticalDepth = createStorageTexture("opticalDepth");
@@ -2026,17 +2043,17 @@ var AtmosphereLUTTexturesContextWebGPU = class extends AtmosphereLUTTexturesCont
       textureType,
       parameters.scatteringTextureSize
     );
-    setupStorageTexture(
+    setupReadTexture(
       this.irradianceRead,
       textureType,
       parameters.irradianceTextureSize
     );
-    setupStorage3DTexture(
+    setupRead3DTexture(
       this.scatteringRead,
       textureType,
       parameters.scatteringTextureSize
     );
-    setupStorage3DTexture(
+    setupRead3DTexture(
       this.higherOrderScatteringRead,
       textureType,
       parameters.scatteringTextureSize
