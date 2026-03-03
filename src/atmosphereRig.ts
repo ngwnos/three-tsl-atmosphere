@@ -209,7 +209,6 @@ export const createAtmosphereRig = (
       0,
       1,
     )
-    const unifiedSolarStrength = normalizedSunStrength * solarVisibility
 
     sunDirectionFromAngles(
       sunState.altitudeDeg,
@@ -257,16 +256,14 @@ export const createAtmosphereRig = (
     ambientLight.intensity = Math.max(0, ambientIntensity * (0.1 + 0.9 * daylight))
 
     if (syncAtmosphereToSun) {
+      const solarScale = normalizedSunStrength
       const syncedAtmosphereSettings: AtmosphereSettings = {
         ...baseAtmosphereSettings,
-        skyIntensity:
-          baseAtmosphereSettings.skyIntensity * THREE.MathUtils.lerp(0.08, 1, unifiedSolarStrength),
-        sunDiscIntensity:
-          baseAtmosphereSettings.sunDiscIntensity *
-          THREE.MathUtils.lerp(0, 1.25, unifiedSolarStrength),
-        sunDiscColorR: baseAtmosphereSettings.sunDiscColorR * sunColorScratch.r,
-        sunDiscColorG: baseAtmosphereSettings.sunDiscColorG * sunColorScratch.g,
-        sunDiscColorB: baseAtmosphereSettings.sunDiscColorB * sunColorScratch.b,
+        skyIntensity: baseAtmosphereSettings.skyIntensity * solarScale,
+        sunDiscIntensity: baseAtmosphereSettings.sunDiscIntensity * solarScale,
+        sunDiscColorR: baseAtmosphereSettings.sunDiscColorR,
+        sunDiscColorG: baseAtmosphereSettings.sunDiscColorG,
+        sunDiscColorB: baseAtmosphereSettings.sunDiscColorB,
       }
       atmosphere.setSettings(syncedAtmosphereSettings)
     }

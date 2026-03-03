@@ -2,9 +2,11 @@
 import * as THREE from "three";
 import { MeshBasicNodeMaterial } from "three/webgpu";
 import {
+  cos as cos2,
   Fn as Fn4,
   cameraPosition,
   dot,
+  fwidth,
   float as float4,
   normalize,
   positionWorld,
@@ -2857,6 +2859,22 @@ var getSkyRadiance = /* @__PURE__ */ FnLayout({
   });
   return radianceTransferStruct(radiance, transmittance);
 });
+var getSolarLuminance = /* @__PURE__ */ FnLayout({
+  name: "getSolarLuminance",
+  type: Luminance3
+})(
+  // @ts-expect-error TODO
+  (_, builder) => {
+    const context = AtmosphereContextBaseNode.get(builder);
+    const {
+      solarIrradiance,
+      sunAngularRadius,
+      sunRadianceToLuminance,
+      luminanceScale
+    } = context;
+    return solarIrradiance.div(PI3.mul(sunAngularRadius.pow2())).mul(sunRadianceToLuminance.mul(luminanceScale));
+  }
+);
 var luminanceTransferStruct = /* @__PURE__ */ struct2(
   {
     luminance: Luminance3,
@@ -2970,8 +2988,7 @@ var createAtmosphereSystem = (scene, initialSettings = DEFAULT_ATMOSPHERE_SETTIN
   const sunDiscColor = uniform3(
     new THREE.Vector3(settings.sunDiscColorR, settings.sunDiscColorG, settings.sunDiscColorB)
   );
-  const sunDiscInnerCos = uniform3(0);
-  const sunDiscOuterCos = uniform3(0);
+  const sunDiscAngularRadius = uniform3(parameters.sunAngularRadius);
   const geometry = new THREE.SphereGeometry(skyDomeRadiusMeters * worldUnitsPerMeter, 64, 32);
   const material = new MeshBasicNodeMaterial();
   material.side = THREE.BackSide;
@@ -2983,9 +3000,12 @@ var createAtmosphereSystem = (scene, initialSettings = DEFAULT_ATMOSPHERE_SETTIN
     const cameraUnit = cameraPosition.sub(planetCenterWorld).mul(worldToUnit).toVar();
     const skyTransfer = getSkyLuminance(cameraUnit, worldViewDir, float4(0), worldSunDir).toVar();
     const skyLuminance = skyTransfer.get("luminance").mul(skyIntensity).mul(skyTint).toVar();
-    const sunAlignment = dot(worldViewDir, worldSunDir).toVar();
-    const sunDisc = smoothstep3(sunDiscOuterCos, sunDiscInnerCos, sunAlignment).mul(sunDiscIntensity).toVar();
-    const sunDiscLuminance = vec36(sunDiscColor).mul(sunDisc).toVar();
+    const sunChordThreshold = cos2(sunDiscAngularRadius).oneMinus().mul(2).toVar();
+    const sunChordVector = worldViewDir.sub(worldSunDir).toVar();
+    const sunChordLength = dot(sunChordVector, sunChordVector).toVar();
+    const sunFilterWidth = fwidth(sunChordLength).toVar();
+    const sunDisc = smoothstep3(sunChordThreshold, sunChordThreshold.sub(sunFilterWidth), sunChordLength).mul(sunDiscIntensity).toVar();
+    const sunDiscLuminance = getSolarLuminance().mul(vec36(sunDiscColor)).mul(sunDisc).mul(skyTransfer.get("transmittance")).toVar();
     return vec45(skyLuminance.add(sunDiscLuminance), float4(1));
   })().context({ atmosphere: atmosphereContext });
   material.colorNode = buildColorNode();
@@ -3001,9 +3021,8 @@ var createAtmosphereSystem = (scene, initialSettings = DEFAULT_ATMOSPHERE_SETTIN
   const syncSunDiscUniforms = () => {
     const innerScale = Math.max(0.01, settings.sunDiscInnerScale);
     const outerScale = Math.max(innerScale + 0.01, settings.sunDiscOuterScale);
-    const sunAngularRadius = parameters.sunAngularRadius;
-    sunDiscInnerCos.value = Math.cos(sunAngularRadius * innerScale);
-    sunDiscOuterCos.value = Math.cos(sunAngularRadius * outerScale);
+    const averageScale = (innerScale + outerScale) * 0.5;
+    sunDiscAngularRadius.value = Math.max(1e-5, parameters.sunAngularRadius * averageScale);
   };
   const applyLutSettings = () => {
     const planetRadiusMeters = Math.max(1, settings.planetRadiusKm) * KM_TO_M;
@@ -3234,7 +3253,6 @@ var createAtmosphereRig = (scene, options = {}) => {
       0,
       1
     );
-    const unifiedSolarStrength = normalizedSunStrength * solarVisibility;
     sunDirectionFromAngles(
       sunState.altitudeDeg,
       sunState.azimuthDeg,
@@ -3267,13 +3285,14 @@ var createAtmosphereRig = (scene, options = {}) => {
     ambientLight.groundColor.copy(ambientGroundScratch);
     ambientLight.intensity = Math.max(0, ambientIntensity * (0.1 + 0.9 * daylight));
     if (syncAtmosphereToSun) {
+      const solarScale = normalizedSunStrength;
       const syncedAtmosphereSettings = {
         ...baseAtmosphereSettings,
-        skyIntensity: baseAtmosphereSettings.skyIntensity * THREE2.MathUtils.lerp(0.08, 1, unifiedSolarStrength),
-        sunDiscIntensity: baseAtmosphereSettings.sunDiscIntensity * THREE2.MathUtils.lerp(0, 1.25, unifiedSolarStrength),
-        sunDiscColorR: baseAtmosphereSettings.sunDiscColorR * sunColorScratch.r,
-        sunDiscColorG: baseAtmosphereSettings.sunDiscColorG * sunColorScratch.g,
-        sunDiscColorB: baseAtmosphereSettings.sunDiscColorB * sunColorScratch.b
+        skyIntensity: baseAtmosphereSettings.skyIntensity * solarScale,
+        sunDiscIntensity: baseAtmosphereSettings.sunDiscIntensity * solarScale,
+        sunDiscColorR: baseAtmosphereSettings.sunDiscColorR,
+        sunDiscColorG: baseAtmosphereSettings.sunDiscColorG,
+        sunDiscColorB: baseAtmosphereSettings.sunDiscColorB
       };
       atmosphere.setSettings(syncedAtmosphereSettings);
     }

@@ -1,9 +1,11 @@
 import * as THREE from 'three'
 import { MeshBasicNodeMaterial, type WebGPURenderer } from 'three/webgpu'
 import {
+  cos,
   Fn,
   cameraPosition,
   dot,
+  fwidth,
   float,
   normalize,
   positionWorld,
@@ -16,7 +18,7 @@ import {
 import { AtmosphereContextNode } from './bruneton/AtmosphereContextNode'
 import { AtmosphereLUTNode } from './bruneton/AtmosphereLUTNode'
 import { AtmosphereParameters } from './bruneton/AtmosphereParameters'
-import { getSkyLuminance } from './bruneton/runtime'
+import { getSkyLuminance, getSolarLuminance } from './bruneton/runtime'
 
 export type AtmosphereSettings = {
   skyIntensity: number
@@ -156,8 +158,7 @@ export const createAtmosphereSystem = (
   const sunDiscColor = uniform(
     new THREE.Vector3(settings.sunDiscColorR, settings.sunDiscColorG, settings.sunDiscColorB),
   )
-  const sunDiscInnerCos = uniform(0)
-  const sunDiscOuterCos = uniform(0)
+  const sunDiscAngularRadius = uniform(parameters.sunAngularRadius)
 
   const geometry = new THREE.SphereGeometry(skyDomeRadiusMeters * worldUnitsPerMeter, 64, 32)
   const material = new MeshBasicNodeMaterial()
@@ -175,12 +176,18 @@ export const createAtmosphereSystem = (
       const skyTransfer = getSkyLuminance(cameraUnit, worldViewDir, float(0), worldSunDir).toVar()
       const skyLuminance = skyTransfer.get('luminance').mul(skyIntensity).mul(skyTint).toVar()
 
-      const sunAlignment = dot(worldViewDir, worldSunDir).toVar()
-      const sunDisc = smoothstep(sunDiscOuterCos, sunDiscInnerCos, sunAlignment)
+      const sunChordThreshold = cos(sunDiscAngularRadius).oneMinus().mul(2).toVar()
+      const sunChordVector = worldViewDir.sub(worldSunDir).toVar()
+      const sunChordLength = dot(sunChordVector, sunChordVector).toVar()
+      const sunFilterWidth = fwidth(sunChordLength).toVar()
+      const sunDisc = smoothstep(sunChordThreshold, sunChordThreshold.sub(sunFilterWidth), sunChordLength)
         .mul(sunDiscIntensity)
         .toVar()
-
-      const sunDiscLuminance = vec3(sunDiscColor).mul(sunDisc).toVar()
+      const sunDiscLuminance = getSolarLuminance()
+        .mul(vec3(sunDiscColor))
+        .mul(sunDisc)
+        .mul(skyTransfer.get('transmittance'))
+        .toVar()
 
       return vec4(skyLuminance.add(sunDiscLuminance), float(1))
     })().context({ atmosphere: atmosphereContext })
@@ -202,9 +209,8 @@ export const createAtmosphereSystem = (
   const syncSunDiscUniforms = (): void => {
     const innerScale = Math.max(0.01, settings.sunDiscInnerScale)
     const outerScale = Math.max(innerScale + 0.01, settings.sunDiscOuterScale)
-    const sunAngularRadius = parameters.sunAngularRadius
-    sunDiscInnerCos.value = Math.cos(sunAngularRadius * innerScale)
-    sunDiscOuterCos.value = Math.cos(sunAngularRadius * outerScale)
+    const averageScale = (innerScale + outerScale) * 0.5
+    sunDiscAngularRadius.value = Math.max(1e-5, parameters.sunAngularRadius * averageScale)
   }
 
   const applyLutSettings = (): void => {
