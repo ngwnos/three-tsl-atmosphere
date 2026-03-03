@@ -54,8 +54,8 @@ renderer.render(scene, camera)
 ### Optional Environment Capture Modes
 
 - `environment.enabled: false` (default): no cubemap capture, fastest dynamic sun updates.
-- `environment.enabled: true, mode: 'manual'`: baked/static probe (capture on `prime()` by default, or call `requestEnvironmentCapture()` manually).
-- `environment.enabled: true, mode: 'on-change'`: recapture only when sun/settings change.
+- `environment.enabled: true, mode: 'manual'`: baked/static probe (capture on `prime()` by default, or call `captureEnvironment(renderer, position?)` directly).
+- `environment.enabled: true, mode: 'on-change'`: recapture when requested (`requestEnvironmentCapture()`) and on tracked changes (sun/settings).
 
 ## API
 
@@ -63,3 +63,6 @@ renderer.render(scene, camera)
 - `createAtmosphereSystem(scene, settings?, options?)`
 - `DEFAULT_ATMOSPHERE_SETTINGS`
 - `sunDirectionFromAngles(altitudeDeg, azimuthDeg, target?)`
+- `AtmosphereLight`
+- `AtmosphereLightNode`
+- `AtmosphereParameters`
