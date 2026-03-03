@@ -2245,6 +2245,7 @@ var AtmosphereLUTTexturesWebGPU = class extends AtmosphereLUTTextures {
       irradianceRead
     } = context;
     const { x: width, y: height } = parameters.irradianceTextureSize;
+    renderer.initTexture(irradianceRead);
     renderer.copyTextureToTexture(this.irradiance, irradianceRead);
     this.indirectIrradianceNode ??= Fn3(() => {
       const size = uvec2(width, height);
@@ -2285,6 +2286,8 @@ var AtmosphereLUTTexturesWebGPU = class extends AtmosphereLUTTextures {
       higherOrderScatteringRead
     } = context;
     const { x: width, y: height, z: depth } = parameters.scatteringTextureSize;
+    renderer.initTexture(scatteringRead);
+    renderer.initTexture(higherOrderScatteringRead);
     renderer.copyTextureToTexture(
       this.scattering,
       scatteringRead,

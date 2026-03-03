@@ -456,6 +456,8 @@ export class AtmosphereLUTTexturesWebGPU extends AtmosphereLUTTextures {
     } = context
     const { x: width, y: height } = parameters.irradianceTextureSize
 
+    renderer.initTexture(irradianceRead)
+
     // TODO: Use NodeAccess.READ_ONLY, which appears to be not supported yet.
     renderer.copyTextureToTexture(this.irradiance, irradianceRead)
 
@@ -508,6 +510,9 @@ export class AtmosphereLUTTexturesWebGPU extends AtmosphereLUTTextures {
       higherOrderScatteringRead
     } = context
     const { x: width, y: height, z: depth } = parameters.scatteringTextureSize
+
+    renderer.initTexture(scatteringRead)
+    renderer.initTexture(higherOrderScatteringRead)
 
     // TODO: Use NodeAccess.READ_ONLY, which appears to be not supported yet.
     renderer.copyTextureToTexture(
