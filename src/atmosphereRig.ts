@@ -16,7 +16,7 @@ export type AtmosphereSunState = {
   intensity: number
 }
 
-export type AtmosphereEnvironmentMode = 'auto' | 'manual'
+export type AtmosphereEnvironmentMode = 'on-change' | 'manual' | 'every-frame' | 'auto'
 
 export type AtmosphereEnvironmentOptions = {
   enabled?: boolean
@@ -26,6 +26,7 @@ export type AtmosphereEnvironmentOptions = {
   far?: number
   captureLayer?: number
   applyToSceneEnvironment?: boolean
+  captureOnPrime?: boolean
 }
 
 export type AtmosphereRigOptions = {
@@ -68,12 +69,26 @@ const DEFAULT_ENVIRONMENT_RESOLUTION = 256
 const DEFAULT_ENVIRONMENT_NEAR = 0.1
 const DEFAULT_ENVIRONMENT_FAR = 250
 
-const SUN_COLOR_HORIZON = new THREE.Color(0xffa266)
-const SUN_COLOR_DAY = new THREE.Color(0xfff7e3)
-const SKY_TINT_NIGHT = new THREE.Color(0x3d4f7f)
-const SKY_TINT_DAY = new THREE.Color(0xe7f4ff)
+const SKY_TINT_NIGHT = new THREE.Color(0x0b1322)
 const AMBIENT_GROUND_NIGHT = new THREE.Color(0x1a2538)
 const AMBIENT_GROUND_DAY = new THREE.Color(0x4a3c2d)
+const RAYLEIGH_EXTINCTION_BASE = new THREE.Vector3(0.06, 0.12, 0.24)
+const MIE_EXTINCTION_BASE = new THREE.Vector3(0.015, 0.015, 0.015)
+const ABSORPTION_EXTINCTION_BASE = new THREE.Vector3(0.003, 0.02, 0.002)
+
+type NormalizedEnvironmentMode = 'on-change' | 'manual' | 'every-frame'
+
+const normalizeEnvironmentMode = (
+  mode: AtmosphereEnvironmentMode | undefined,
+): NormalizedEnvironmentMode => {
+  if (mode === 'manual') {
+    return 'manual'
+  }
+  if (mode === 'every-frame') {
+    return 'every-frame'
+  }
+  return 'on-change'
+}
 
 const createEnvironmentTarget = (resolution: number): THREE.WebGLCubeRenderTarget => {
   const target = new THREE.WebGLCubeRenderTarget(resolution, {
@@ -84,6 +99,12 @@ const createEnvironmentTarget = (resolution: number): THREE.WebGLCubeRenderTarge
   })
   target.texture.colorSpace = THREE.LinearSRGBColorSpace
   return target
+}
+
+const computeAirMass = (altitudeDeg: number): number => {
+  const zenithDegrees = THREE.MathUtils.clamp(90 - altitudeDeg, 0, 89.9)
+  const cosZenith = Math.cos(THREE.MathUtils.degToRad(zenithDegrees))
+  return 1 / Math.max(0.03, cosZenith + 0.15 * Math.pow(Math.max(0.01, 93.885 - zenithDegrees), -1.253))
 }
 
 export const createAtmosphereRig = (
@@ -125,16 +146,17 @@ export const createAtmosphereRig = (
   scene.add(sunLight)
 
   const ambientLight = new THREE.HemisphereLight(
-    SKY_TINT_DAY.getHex(),
+    0xffffff,
     AMBIENT_GROUND_DAY.getHex(),
     DEFAULT_AMBIENT_INTENSITY,
   )
   scene.add(ambientLight)
 
   const environmentOptions = options.environment ?? {}
-  const environmentEnabled = environmentOptions.enabled ?? true
-  const environmentMode: AtmosphereEnvironmentMode = environmentOptions.mode ?? 'auto'
+  const environmentEnabled = environmentOptions.enabled ?? false
+  const environmentMode = normalizeEnvironmentMode(environmentOptions.mode)
   const environmentApplyToScene = environmentOptions.applyToSceneEnvironment ?? true
+  const environmentCaptureOnPrime = environmentOptions.captureOnPrime ?? true
   const environmentCaptureLayer = THREE.MathUtils.clamp(
     Math.floor(environmentOptions.captureLayer ?? skyLayer),
     0,
@@ -175,6 +197,7 @@ export const createAtmosphereRig = (
   const sunColorScratch = new THREE.Color()
   const skyTintScratch = new THREE.Color()
   const ambientGroundScratch = new THREE.Color()
+  const extinctionScratch = new THREE.Vector3()
   const capturePositionScratch = new THREE.Vector3(0, 0, 0)
 
   let ambientIntensity =
@@ -193,20 +216,14 @@ export const createAtmosphereRig = (
 
   const applyLightingAndAtmosphereFromSun = (): void => {
     const altitudeRadians = THREE.MathUtils.degToRad(sunState.altitudeDeg)
-    const daylight = THREE.MathUtils.clamp(Math.sin(altitudeRadians) * 0.85 + 0.15, 0, 1)
+    const daylight = THREE.MathUtils.clamp(Math.sin(altitudeRadians) * 0.5 + 0.5, 0, 1)
+    const solarVisibility = THREE.MathUtils.smoothstep(sunState.altitudeDeg, -8, 2)
     const normalizedSunStrength = THREE.MathUtils.clamp(
       sunState.intensity / maxSunIntensity,
       0,
       1,
     )
-    const solarVisibility = THREE.MathUtils.clamp(0.2 + daylight * 0.8, 0, 1)
     const unifiedSolarStrength = normalizedSunStrength * solarVisibility
-
-    sunColorScratch.copy(SUN_COLOR_HORIZON).lerp(SUN_COLOR_DAY, Math.pow(daylight, 0.35))
-    skyTintScratch.copy(SKY_TINT_NIGHT).lerp(SKY_TINT_DAY, Math.pow(daylight, 0.55))
-    ambientGroundScratch
-      .copy(AMBIENT_GROUND_NIGHT)
-      .lerp(AMBIENT_GROUND_DAY, Math.pow(daylight, 0.45))
 
     sunDirectionFromAngles(
       sunState.altitudeDeg,
@@ -214,25 +231,54 @@ export const createAtmosphereRig = (
       sunDirectionScratch,
     )
 
+    const rayleighScale = Math.max(0, atmosphereSettings.rayleighScatteringMultiplier)
+    const mieScale = Math.max(0, atmosphereSettings.mieExtinctionMultiplier)
+    const absorptionScale = Math.max(0, atmosphereSettings.absorptionExtinctionMultiplier)
+    extinctionScratch
+      .copy(RAYLEIGH_EXTINCTION_BASE)
+      .multiplyScalar(rayleighScale)
+      .addScaledVector(MIE_EXTINCTION_BASE, mieScale)
+      .addScaledVector(ABSORPTION_EXTINCTION_BASE, absorptionScale)
+      .multiplyScalar(computeAirMass(sunState.altitudeDeg))
+
+    sunColorScratch.setRGB(
+      Math.exp(-extinctionScratch.x),
+      Math.exp(-extinctionScratch.y),
+      Math.exp(-extinctionScratch.z),
+    )
+
     sunLight.color.copy(sunColorScratch)
-    sunLight.intensity = Math.max(0, sunState.intensity)
+    sunLight.intensity = Math.max(0, sunState.intensity * solarVisibility)
     sunLight.position.copy(sunDirectionScratch).multiplyScalar(sunDistance)
     sunTarget.position.set(0, 0, 0)
     sunTarget.updateMatrixWorld()
 
+    skyTintScratch.setRGB(
+      Math.max(0, atmosphereSettings.skyTintR),
+      Math.max(0, atmosphereSettings.skyTintG),
+      Math.max(0, atmosphereSettings.skyTintB),
+    )
+    skyTintScratch.multiplyScalar(Math.max(0, atmosphereSettings.skyIntensity))
+    skyTintScratch.multiplyScalar(0.15 + daylight * 0.85)
+    skyTintScratch.lerp(SKY_TINT_NIGHT, Math.pow(1 - daylight, 0.6))
+
+    ambientGroundScratch
+      .copy(AMBIENT_GROUND_NIGHT)
+      .lerp(AMBIENT_GROUND_DAY, Math.pow(daylight, 0.4))
+
     ambientLight.color.copy(skyTintScratch).multiplyScalar(0.7 + daylight * 0.3)
     ambientLight.groundColor.copy(ambientGroundScratch)
-    ambientLight.intensity = Math.max(0, ambientIntensity)
+    ambientLight.intensity = Math.max(0, ambientIntensity * (0.1 + 0.9 * daylight))
 
     if (syncAtmosphereToSun) {
-      const skyTintStrength = THREE.MathUtils.lerp(0.4, 1, unifiedSolarStrength)
+      const skyTintStrength = THREE.MathUtils.lerp(0.3, 1, unifiedSolarStrength)
       atmosphereSettings = {
         ...atmosphereSettings,
-        skyIntensity: THREE.MathUtils.lerp(0.06, 3.2, unifiedSolarStrength),
+        skyIntensity: THREE.MathUtils.lerp(0.05, 3.2, unifiedSolarStrength),
         skyTintR: skyTintScratch.r * skyTintStrength,
         skyTintG: skyTintScratch.g * skyTintStrength,
         skyTintB: skyTintScratch.b * skyTintStrength,
-        sunDiscIntensity: THREE.MathUtils.lerp(0, 18, normalizedSunStrength),
+        sunDiscIntensity: THREE.MathUtils.lerp(0, 18, unifiedSolarStrength),
         sunDiscColorR: sunColorScratch.r,
         sunDiscColorG: sunColorScratch.g,
         sunDiscColorB: sunColorScratch.b,
@@ -296,7 +342,14 @@ export const createAtmosphereRig = (
     if (camera) {
       setCameraPosition(camera.position)
     }
-    if (environmentEnabled && environmentMode === 'auto' && environmentDirty) {
+    if (!environmentEnabled) {
+      return
+    }
+    if (environmentMode === 'every-frame') {
+      captureEnvironment(renderer, capturePositionScratch)
+      return
+    }
+    if (environmentMode === 'on-change' && environmentDirty) {
       captureEnvironment(renderer, capturePositionScratch)
     }
   }
@@ -308,7 +361,7 @@ export const createAtmosphereRig = (
   const prime = async (renderer: WebGPURenderer): Promise<void> => {
     rendererRef = renderer
     await atmosphere.prime(renderer)
-    if (environmentEnabled) {
+    if (environmentEnabled && environmentCaptureOnPrime) {
       captureEnvironment(renderer, capturePositionScratch)
     }
   }
@@ -357,10 +410,6 @@ export const createAtmosphereRig = (
   }
 
   applyLightingAndAtmosphereFromSun()
-
-  if (rendererRef && environmentEnabled) {
-    environmentDirty = true
-  }
 
   return {
     atmosphere,

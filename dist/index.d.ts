@@ -59,7 +59,7 @@ export type AtmosphereSunState = {
   intensity: number
 }
 
-export type AtmosphereEnvironmentMode = 'auto' | 'manual'
+export type AtmosphereEnvironmentMode = 'on-change' | 'manual' | 'every-frame' | 'auto'
 
 export type AtmosphereEnvironmentOptions = {
   enabled?: boolean
@@ -69,6 +69,7 @@ export type AtmosphereEnvironmentOptions = {
   far?: number
   captureLayer?: number
   applyToSceneEnvironment?: boolean
+  captureOnPrime?: boolean
 }
 
 export type AtmosphereRigOptions = {

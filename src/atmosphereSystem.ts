@@ -257,8 +257,6 @@ export const createAtmosphereSystem = (
       clampNonNegative(settings.sunDiscColorB),
     )
     syncSunDiscUniforms()
-    material.colorNode = buildColorNode()
-    material.needsUpdate = true
   }
 
   const scheduleReprime = (): void => {
@@ -317,8 +315,6 @@ export const createAtmosphereSystem = (
       sunScratch.normalize()
     }
     sunDirectionWorld.value.copy(sunScratch)
-    material.colorNode = buildColorNode()
-    material.needsUpdate = true
   }
 
   const setCameraPosition = (positionWorld: THREE.Vector3): void => {

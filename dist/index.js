@@ -3038,8 +3038,6 @@ var createAtmosphereSystem = (scene, initialSettings = DEFAULT_ATMOSPHERE_SETTIN
       clampNonNegative(settings.sunDiscColorB)
     );
     syncSunDiscUniforms();
-    material.colorNode = buildColorNode();
-    material.needsUpdate = true;
   };
   const scheduleReprime = () => {
     const activeRenderer = rendererRef;
@@ -3091,8 +3089,6 @@ var createAtmosphereSystem = (scene, initialSettings = DEFAULT_ATMOSPHERE_SETTIN
       sunScratch.normalize();
     }
     sunDirectionWorld.value.copy(sunScratch);
-    material.colorNode = buildColorNode();
-    material.needsUpdate = true;
   };
   const setCameraPosition = (positionWorld2) => {
     skyMesh.position.copy(positionWorld2);
@@ -3132,12 +3128,21 @@ var DEFAULT_AMBIENT_INTENSITY = 0.35;
 var DEFAULT_ENVIRONMENT_RESOLUTION = 256;
 var DEFAULT_ENVIRONMENT_NEAR = 0.1;
 var DEFAULT_ENVIRONMENT_FAR = 250;
-var SUN_COLOR_HORIZON = new THREE2.Color(16753254);
-var SUN_COLOR_DAY = new THREE2.Color(16775139);
-var SKY_TINT_NIGHT = new THREE2.Color(4018047);
-var SKY_TINT_DAY = new THREE2.Color(15201535);
+var SKY_TINT_NIGHT = new THREE2.Color(725794);
 var AMBIENT_GROUND_NIGHT = new THREE2.Color(1713464);
 var AMBIENT_GROUND_DAY = new THREE2.Color(4865069);
+var RAYLEIGH_EXTINCTION_BASE = new THREE2.Vector3(0.06, 0.12, 0.24);
+var MIE_EXTINCTION_BASE = new THREE2.Vector3(0.015, 0.015, 0.015);
+var ABSORPTION_EXTINCTION_BASE = new THREE2.Vector3(3e-3, 0.02, 2e-3);
+var normalizeEnvironmentMode = (mode) => {
+  if (mode === "manual") {
+    return "manual";
+  }
+  if (mode === "every-frame") {
+    return "every-frame";
+  }
+  return "on-change";
+};
 var createEnvironmentTarget = (resolution) => {
   const target = new THREE2.WebGLCubeRenderTarget(resolution, {
     type: THREE2.HalfFloatType,
@@ -3147,6 +3152,11 @@ var createEnvironmentTarget = (resolution) => {
   });
   target.texture.colorSpace = THREE2.LinearSRGBColorSpace;
   return target;
+};
+var computeAirMass = (altitudeDeg) => {
+  const zenithDegrees = THREE2.MathUtils.clamp(90 - altitudeDeg, 0, 89.9);
+  const cosZenith = Math.cos(THREE2.MathUtils.degToRad(zenithDegrees));
+  return 1 / Math.max(0.03, cosZenith + 0.15 * Math.pow(Math.max(0.01, 93.885 - zenithDegrees), -1.253));
 };
 var createAtmosphereRig = (scene, options = {}) => {
   let atmosphereSettings = {
@@ -3173,15 +3183,16 @@ var createAtmosphereRig = (scene, options = {}) => {
   sunLight.target = sunTarget;
   scene.add(sunLight);
   const ambientLight = new THREE2.HemisphereLight(
-    SKY_TINT_DAY.getHex(),
+    16777215,
     AMBIENT_GROUND_DAY.getHex(),
     DEFAULT_AMBIENT_INTENSITY
   );
   scene.add(ambientLight);
   const environmentOptions = options.environment ?? {};
-  const environmentEnabled = environmentOptions.enabled ?? true;
-  const environmentMode = environmentOptions.mode ?? "auto";
+  const environmentEnabled = environmentOptions.enabled ?? false;
+  const environmentMode = normalizeEnvironmentMode(environmentOptions.mode);
   const environmentApplyToScene = environmentOptions.applyToSceneEnvironment ?? true;
+  const environmentCaptureOnPrime = environmentOptions.captureOnPrime ?? true;
   const environmentCaptureLayer = THREE2.MathUtils.clamp(
     Math.floor(environmentOptions.captureLayer ?? skyLayer),
     0,
@@ -3213,6 +3224,7 @@ var createAtmosphereRig = (scene, options = {}) => {
   const sunColorScratch = new THREE2.Color();
   const skyTintScratch = new THREE2.Color();
   const ambientGroundScratch = new THREE2.Color();
+  const extinctionScratch = new THREE2.Vector3();
   const capturePositionScratch = new THREE2.Vector3(0, 0, 0);
   let ambientIntensity = Number.isFinite(options.ambientIntensity) && (options.ambientIntensity ?? -1) >= 0 ? options.ambientIntensity : DEFAULT_AMBIENT_INTENSITY;
   let sunState = {
@@ -3224,39 +3236,54 @@ var createAtmosphereRig = (scene, options = {}) => {
   let environmentDirty = true;
   const applyLightingAndAtmosphereFromSun = () => {
     const altitudeRadians = THREE2.MathUtils.degToRad(sunState.altitudeDeg);
-    const daylight = THREE2.MathUtils.clamp(Math.sin(altitudeRadians) * 0.85 + 0.15, 0, 1);
+    const daylight = THREE2.MathUtils.clamp(Math.sin(altitudeRadians) * 0.5 + 0.5, 0, 1);
+    const solarVisibility = THREE2.MathUtils.smoothstep(sunState.altitudeDeg, -8, 2);
     const normalizedSunStrength = THREE2.MathUtils.clamp(
       sunState.intensity / maxSunIntensity,
       0,
       1
     );
-    const solarVisibility = THREE2.MathUtils.clamp(0.2 + daylight * 0.8, 0, 1);
     const unifiedSolarStrength = normalizedSunStrength * solarVisibility;
-    sunColorScratch.copy(SUN_COLOR_HORIZON).lerp(SUN_COLOR_DAY, Math.pow(daylight, 0.35));
-    skyTintScratch.copy(SKY_TINT_NIGHT).lerp(SKY_TINT_DAY, Math.pow(daylight, 0.55));
-    ambientGroundScratch.copy(AMBIENT_GROUND_NIGHT).lerp(AMBIENT_GROUND_DAY, Math.pow(daylight, 0.45));
     sunDirectionFromAngles(
       sunState.altitudeDeg,
       sunState.azimuthDeg,
       sunDirectionScratch
     );
+    const rayleighScale = Math.max(0, atmosphereSettings.rayleighScatteringMultiplier);
+    const mieScale = Math.max(0, atmosphereSettings.mieExtinctionMultiplier);
+    const absorptionScale = Math.max(0, atmosphereSettings.absorptionExtinctionMultiplier);
+    extinctionScratch.copy(RAYLEIGH_EXTINCTION_BASE).multiplyScalar(rayleighScale).addScaledVector(MIE_EXTINCTION_BASE, mieScale).addScaledVector(ABSORPTION_EXTINCTION_BASE, absorptionScale).multiplyScalar(computeAirMass(sunState.altitudeDeg));
+    sunColorScratch.setRGB(
+      Math.exp(-extinctionScratch.x),
+      Math.exp(-extinctionScratch.y),
+      Math.exp(-extinctionScratch.z)
+    );
     sunLight.color.copy(sunColorScratch);
-    sunLight.intensity = Math.max(0, sunState.intensity);
+    sunLight.intensity = Math.max(0, sunState.intensity * solarVisibility);
     sunLight.position.copy(sunDirectionScratch).multiplyScalar(sunDistance);
     sunTarget.position.set(0, 0, 0);
     sunTarget.updateMatrixWorld();
+    skyTintScratch.setRGB(
+      Math.max(0, atmosphereSettings.skyTintR),
+      Math.max(0, atmosphereSettings.skyTintG),
+      Math.max(0, atmosphereSettings.skyTintB)
+    );
+    skyTintScratch.multiplyScalar(Math.max(0, atmosphereSettings.skyIntensity));
+    skyTintScratch.multiplyScalar(0.15 + daylight * 0.85);
+    skyTintScratch.lerp(SKY_TINT_NIGHT, Math.pow(1 - daylight, 0.6));
+    ambientGroundScratch.copy(AMBIENT_GROUND_NIGHT).lerp(AMBIENT_GROUND_DAY, Math.pow(daylight, 0.4));
     ambientLight.color.copy(skyTintScratch).multiplyScalar(0.7 + daylight * 0.3);
     ambientLight.groundColor.copy(ambientGroundScratch);
-    ambientLight.intensity = Math.max(0, ambientIntensity);
+    ambientLight.intensity = Math.max(0, ambientIntensity * (0.1 + 0.9 * daylight));
     if (syncAtmosphereToSun) {
-      const skyTintStrength = THREE2.MathUtils.lerp(0.4, 1, unifiedSolarStrength);
+      const skyTintStrength = THREE2.MathUtils.lerp(0.3, 1, unifiedSolarStrength);
       atmosphereSettings = {
         ...atmosphereSettings,
-        skyIntensity: THREE2.MathUtils.lerp(0.06, 3.2, unifiedSolarStrength),
+        skyIntensity: THREE2.MathUtils.lerp(0.05, 3.2, unifiedSolarStrength),
         skyTintR: skyTintScratch.r * skyTintStrength,
         skyTintG: skyTintScratch.g * skyTintStrength,
         skyTintB: skyTintScratch.b * skyTintStrength,
-        sunDiscIntensity: THREE2.MathUtils.lerp(0, 18, normalizedSunStrength),
+        sunDiscIntensity: THREE2.MathUtils.lerp(0, 18, unifiedSolarStrength),
         sunDiscColorR: sunColorScratch.r,
         sunDiscColorG: sunColorScratch.g,
         sunDiscColorB: sunColorScratch.b
@@ -3299,7 +3326,14 @@ var createAtmosphereRig = (scene, options = {}) => {
     if (camera) {
       setCameraPosition(camera.position);
     }
-    if (environmentEnabled && environmentMode === "auto" && environmentDirty) {
+    if (!environmentEnabled) {
+      return;
+    }
+    if (environmentMode === "every-frame") {
+      captureEnvironment(renderer, capturePositionScratch);
+      return;
+    }
+    if (environmentMode === "on-change" && environmentDirty) {
       captureEnvironment(renderer, capturePositionScratch);
     }
   };
@@ -3309,7 +3343,7 @@ var createAtmosphereRig = (scene, options = {}) => {
   const prime = async (renderer) => {
     rendererRef = renderer;
     await atmosphere.prime(renderer);
-    if (environmentEnabled) {
+    if (environmentEnabled && environmentCaptureOnPrime) {
       captureEnvironment(renderer, capturePositionScratch);
     }
   };
@@ -3350,9 +3384,6 @@ var createAtmosphereRig = (scene, options = {}) => {
     rendererRef = null;
   };
   applyLightingAndAtmosphereFromSun();
-  if (rendererRef && environmentEnabled) {
-    environmentDirty = true;
-  }
   return {
     atmosphere,
     sunLight,

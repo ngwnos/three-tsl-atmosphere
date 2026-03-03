@@ -36,8 +36,8 @@ const atmosphereRig = createAtmosphereRig(scene, {
     intensity: 1.2,
   },
   environment: {
-    enabled: true,
-    mode: 'auto',
+    enabled: false, // default (fast dynamic sun)
+    mode: 'on-change',
     resolution: 256,
   },
 })
@@ -50,6 +50,13 @@ atmosphereRig.setSunIntensity(2.0)
 atmosphereRig.update(renderer, camera)
 renderer.render(scene, camera)
 ```
+
+### Optional Environment Capture Modes
+
+- `environment.enabled: false` (default): no cubemap capture, fastest dynamic sun updates.
+- `environment.enabled: true, mode: 'manual'`: baked/static probe (capture on `prime()` by default, or call `requestEnvironmentCapture()` manually).
+- `environment.enabled: true, mode: 'on-change'` (or legacy `'auto'`): recapture only when sun/settings change.
+- `environment.enabled: true, mode: 'every-frame'`: fully dynamic probe capture (highest cost).
 
 ## API
 
