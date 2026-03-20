@@ -1,24 +1,14 @@
-:root {
-  color-scheme: dark;
-  font-family: "IBM Plex Sans", "Avenir Next", "Segoe UI", sans-serif;
-  background:
-    radial-gradient(circle at top, rgba(87, 129, 203, 0.18), transparent 38%),
-    linear-gradient(180deg, #08101b 0%, #03060a 100%);
-  color: #ecf3ff;
-}
-
-* {
-  box-sizing: border-box;
-}
-
 html,
 body {
   margin: 0;
-  min-height: 100%;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #000;
 }
 
 body {
-  overflow: hidden;
+  font-family: sans-serif;
 }
 
 #app {
@@ -27,88 +17,9 @@ body {
   height: 100vh;
 }
 
-.hud {
-  position: fixed;
-  top: 20px;
-  left: 20px;
-  width: min(360px, calc(100vw - 40px));
-  padding: 18px 18px 16px;
-  border: 1px solid rgba(190, 223, 255, 0.18);
-  border-radius: 18px;
-  background: linear-gradient(180deg, rgba(8, 13, 22, 0.82), rgba(5, 8, 14, 0.74));
-  backdrop-filter: blur(18px);
-  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.42), inset 0 1px 0 rgba(255, 255, 255, 0.05);
-}
-
-.hud__title h1 {
+pre {
   margin: 0;
-  font-size: 1.2rem;
-  letter-spacing: 0.02em;
-}
-
-.hud__title p {
-  margin: 8px 0 0;
-  color: rgba(227, 237, 255, 0.72);
-  font-size: 0.92rem;
-  line-height: 1.35;
-}
-
-.hud__controls {
-  display: grid;
-  gap: 12px;
-  margin-top: 18px;
-}
-
-.hud__controls label {
-  display: grid;
-  grid-template-columns: 72px 1fr auto;
-  align-items: center;
-  gap: 12px;
-  color: rgba(235, 243, 255, 0.92);
-  font-size: 0.92rem;
-}
-
-.hud__controls input[type="range"] {
-  width: 100%;
-  accent-color: #ffb76b;
-}
-
-.hud__controls strong {
-  min-width: 44px;
-  text-align: right;
-  font-variant-numeric: tabular-nums;
-  color: #ffd0a3;
-}
-
-.pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-  margin-top: 16px;
-  padding: 9px 12px;
-  border: 1px solid rgba(255, 255, 255, 0.09);
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.05);
-  font-size: 0.84rem;
-}
-
-.pill input {
-  margin: 0;
-}
-
-@media (max-width: 720px) {
-  .hud {
-    top: 12px;
-    left: 12px;
-    width: calc(100vw - 24px);
-  }
-
-  .hud__controls label {
-    grid-template-columns: 1fr;
-    gap: 6px;
-  }
-
-  .hud__controls strong {
-    text-align: left;
-  }
+  padding: 16px;
+  color: #fff;
+  background: #000;
 }
