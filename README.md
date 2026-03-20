@@ -16,6 +16,16 @@ This package extracts and packages the LUT precompute + sky runtime workflow int
 bun add github:ngwnos/three-tsl-atmosphere#main
 ```
 
+## Demo
+
+This repo now includes a plain WebGPU demo app under [`demo/`](./demo).
+
+```bash
+bun install
+bun run build:demo
+bun run dev:demo
+```
+
 ## Usage (Drop-In Rig)
 
 ```ts

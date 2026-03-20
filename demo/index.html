@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>three-tsl-atmosphere Demo</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <canvas id="app"></canvas>
+    <section class="hud">
+      <div class="hud__title">
+        <h1>three-tsl-atmosphere</h1>
+        <p>Bruneton-style precomputed sky, sun, and environment lighting.</p>
+      </div>
+      <div class="hud__controls">
+        <label>
+          <span>Altitude</span>
+          <input id="altitude" type="range" min="-4" max="88" step="1" value="18" />
+          <strong id="altitude-value">18°</strong>
+        </label>
+        <label>
+          <span>Azimuth</span>
+          <input id="azimuth" type="range" min="-180" max="180" step="1" value="-30" />
+          <strong id="azimuth-value">-30°</strong>
+        </label>
+        <label>
+          <span>Intensity</span>
+          <input id="intensity" type="range" min="0" max="12" step="0.1" value="4.8" />
+          <strong id="intensity-value">4.8</strong>
+        </label>
+      </div>
+      <label class="pill">
+        <input id="animate" type="checkbox" checked />
+        <span>Animate Sun</span>
+      </label>
+    </section>
+    <script type="module" src="./main.js"></script>
+  </body>
+</html>

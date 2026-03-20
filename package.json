@@ -3,6 +3,9 @@
   "version": "0.1.0",
   "description": "Reusable Bruneton-style precomputed atmosphere LUT system for three.js TSL/WebGPU",
   "type": "module",
+  "workspaces": [
+    "demo"
+  ],
   "main": "./dist/index.js",
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -16,8 +19,12 @@
     "dist"
   ],
   "scripts": {
-    "build": "tsup src/index.ts --format esm --clean && cp src/index.d.ts dist/index.d.ts",
-    "dev": "tsup src/index.ts --format esm --watch"
+    "build": "bun run build:lib",
+    "build:lib": "tsup src/index.ts --format esm --clean && cp src/index.d.ts dist/index.d.ts",
+    "build:demo": "bun run --cwd demo build",
+    "dev": "bun run dev:lib",
+    "dev:lib": "tsup src/index.ts --format esm --watch",
+    "dev:demo": "bun run --cwd demo dev"
   },
   "keywords": [
     "three",
