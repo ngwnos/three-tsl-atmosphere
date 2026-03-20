@@ -16,6 +16,7 @@ const renderer = new WebGPURenderer({ canvas, antialias: true, alpha: false })
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
 
 const atmosphereRig = createAtmosphereRig(scene, {
+  skyLayer: 0,
   sun: {
     altitudeDeg: 24,
     azimuthDeg: -35,
