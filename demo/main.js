@@ -31,12 +31,36 @@ const atmosphereRig = createAtmosphereRig(scene, {
 const handleResize = () => {
   const width = window.innerWidth
   const height = window.innerHeight
-  camera.aspect = width / height
+  camera.aspect = width / Math.max(1, height)
   camera.updateProjectionMatrix()
   renderer.setSize(width, height, false)
 }
 
+const renderDisplayFrame = () => {
+  atmosphereRig.update(renderer, camera)
+  renderer.render(scene, camera)
+}
+
+const createIdeaOrcaCapture = () => ({
+  describe: async () => ({
+    name: 'three-tsl-atmosphere',
+    mode: 'manual',
+    width: canvas.clientWidth || window.innerWidth,
+    height: canvas.clientHeight || window.innerHeight,
+  }),
+  prepare: async () => {
+    handleResize()
+    renderDisplayFrame()
+  },
+  renderFrame: async () => {
+    handleResize()
+    renderDisplayFrame()
+  },
+  getVideoFrameSource: async () => canvas,
+})
+
 window.addEventListener('resize', handleResize)
+globalThis.__ideaOrcaCapture = createIdeaOrcaCapture()
 
 const bootstrap = async () => {
   if (!navigator.gpu) {
@@ -50,8 +74,7 @@ const bootstrap = async () => {
   window.dispatchEvent(new Event('idea-orca-preview-ready'))
 
   renderer.setAnimationLoop(() => {
-    atmosphereRig.update(renderer, camera)
-    renderer.render(scene, camera)
+    renderDisplayFrame()
   })
 }
 
