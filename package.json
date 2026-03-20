@@ -24,7 +24,9 @@
     "build:demo": "bun run --cwd demo build",
     "dev": "bun run dev:lib",
     "dev:lib": "tsup src/index.ts --format esm --watch",
-    "dev:demo": "bun run --cwd demo dev"
+    "dev:demo": "bun run --cwd demo dev",
+    "preview": "bun run --cwd demo preview",
+    "preview:orca": "bun run --cwd demo preview"
   },
   "keywords": [
     "three",
