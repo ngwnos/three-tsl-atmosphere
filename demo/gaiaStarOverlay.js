@@ -104,6 +104,10 @@ export class GaiaStarOverlay {
     this.tmpViewProj = new THREE.Matrix4()
   }
 
+  setExposure(exposure) {
+    this.starExposureU.value = STAR_EXPOSURE * Math.max(0, exposure)
+  }
+
   async load(url) {
     const response = await fetch(url)
     if (!response.ok) {

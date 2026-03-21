@@ -24,6 +24,9 @@ const ALTITUDE_SPEED_FACTOR = 1.5
 const SUN_ALTITUDE_STEP_DEG = 2
 const MIN_SUN_ALTITUDE_DEG = -90
 const MAX_SUN_ALTITUDE_DEG = 90
+const MIN_EXPOSURE = 0.125
+const MAX_EXPOSURE = 16
+const EXPOSURE_STEP_STOPS = 1 / 3
 
 const canvas = document.querySelector('#app')
 if (!(canvas instanceof HTMLCanvasElement)) {
@@ -52,6 +55,7 @@ let lastPointerX = 0
 let lastPointerY = 0
 let atmospherePreset = 'earth'
 let altitudeMeters = MIN_ALTITUDE_METERS
+let exposure = 1
 const sunState = {
   altitudeDeg: 24,
   azimuthDeg: -35,
@@ -78,6 +82,21 @@ const atmosphereRig = createAtmosphereRig(scene, {
   ambientIntensity: 0,
 })
 const starOverlay = new GaiaStarOverlay()
+
+const getActiveAtmosphereSettings = () =>
+  atmospherePreset === 'alternate'
+    ? ALT_ATMOSPHERE_SETTINGS
+    : EARTH_ATMOSPHERE_SETTINGS
+
+const applyVisualExposure = () => {
+  const baseSettings = getActiveAtmosphereSettings()
+  atmosphereRig.setAtmosphereSettings({
+    ...baseSettings,
+    skyIntensity: baseSettings.skyIntensity * exposure,
+    sunDiscIntensity: baseSettings.sunDiscIntensity * exposure,
+  })
+  starOverlay.setExposure(exposure)
+}
 
 const applyCameraOrientation = () => {
   camera.position.copy(cameraAnchor)
@@ -114,11 +133,7 @@ const renderDisplayFrame = () => {
 
 const setAtmospherePreset = (nextPreset) => {
   atmospherePreset = nextPreset
-  atmosphereRig.setAtmosphereSettings(
-    nextPreset === 'alternate'
-      ? ALT_ATMOSPHERE_SETTINGS
-      : EARTH_ATMOSPHERE_SETTINGS,
-  )
+  applyVisualExposure()
   void atmosphereRig
     .prime(renderer)
     .then(() => {
@@ -140,6 +155,15 @@ const adjustSunAltitude = (deltaDeg) => {
     MAX_SUN_ALTITUDE_DEG,
   )
   atmosphereRig.setSunAngles(sunState.altitudeDeg, sunState.azimuthDeg)
+}
+
+const adjustExposure = (deltaStops) => {
+  exposure = THREE.MathUtils.clamp(
+    exposure * 2 ** deltaStops,
+    MIN_EXPOSURE,
+    MAX_EXPOSURE,
+  )
+  applyVisualExposure()
 }
 
 const stopDragging = () => {
@@ -258,13 +282,25 @@ window.addEventListener('keydown', (event) => {
     return
   }
 
-  if (event.key === '+' || event.key === '=') {
+  if (event.key === '+') {
+    event.preventDefault()
+    adjustExposure(EXPOSURE_STEP_STOPS)
+    return
+  }
+
+  if (event.key === '_') {
+    event.preventDefault()
+    adjustExposure(-EXPOSURE_STEP_STOPS)
+    return
+  }
+
+  if (event.key === '=') {
     event.preventDefault()
     adjustSunAltitude(SUN_ALTITUDE_STEP_DEG)
     return
   }
 
-  if (event.key === '-' || event.key === '_') {
+  if (event.key === '-') {
     event.preventDefault()
     adjustSunAltitude(-SUN_ALTITUDE_STEP_DEG)
     return
@@ -335,6 +371,7 @@ const bootstrap = async () => {
     atmosphereRig.prime(renderer),
     starOverlay.load('/data/gaia/chunk_0000.bin'),
   ])
+  applyVisualExposure()
 
   window.dispatchEvent(new Event('idea-orca-preview-ready'))
 
