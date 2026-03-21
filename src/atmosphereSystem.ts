@@ -297,7 +297,8 @@ export const createAtmosphereSystem = (
   let rendererRef: WebGPURenderer | null = null
   let primePromise: Promise<void> | null = null
   let pendingReprimeTimeout: ReturnType<typeof setTimeout> | null = null
-  let lastLutSettingsKey = ''
+  let appliedLutSettingsKey = ''
+  let hasPrimedLuts = false
 
   const syncSunDiscUniforms = (): void => {
     const innerScale = Math.max(0.01, settings.sunDiscInnerScale)
@@ -306,48 +307,70 @@ export const createAtmosphereSystem = (
     sunDiscAngularRadius.value = Math.max(1e-5, parameters.sunAngularRadius * averageScale)
   }
 
-  const applyLutSettings = (): void => {
+  const configureParametersForSettings = (
+    sourceSettings: AtmosphereSettings,
+  ): { planetRadiusMeters: number; parametersSnapshot: AtmosphereParameters } => {
     const planetRadiusMeters = clampPositive(
-      settings.planetRadiusM,
+      sourceSettings.planetRadiusM,
       DEFAULT_ATMOSPHERE_SETTINGS.planetRadiusM,
     )
     const atmosphereHeightMeters = clampPositive(
-      settings.atmosphereHeightM,
+      sourceSettings.atmosphereHeightM,
       DEFAULT_ATMOSPHERE_SETTINGS.atmosphereHeightM,
     )
 
     parameters.bottomRadius = planetRadiusMeters
     parameters.topRadius = planetRadiusMeters + atmosphereHeightMeters
 
-    parameters.rayleighDensity.layers[1].expScale = -1 / Math.max(1, settings.rayleighScaleHeightM)
-    parameters.mieDensity.layers[1].expScale = -1 / Math.max(1, settings.mieScaleHeightM)
+    parameters.rayleighDensity.layers[1].expScale =
+      -1 / Math.max(1, sourceSettings.rayleighScaleHeightM)
+    parameters.mieDensity.layers[1].expScale = -1 / Math.max(1, sourceSettings.mieScaleHeightM)
 
-    parameters.miePhaseFunctionG = THREE.MathUtils.clamp(settings.miePhaseG, 0, 0.999)
+    parameters.miePhaseFunctionG = THREE.MathUtils.clamp(sourceSettings.miePhaseG, 0, 0.999)
 
     parameters.rayleighScattering
       .copy(baseRayleigh)
-      .multiplyScalar(clampNonNegative(settings.rayleighScatteringMultiplier))
+      .multiplyScalar(clampNonNegative(sourceSettings.rayleighScatteringMultiplier))
     parameters.mieScattering
       .copy(baseMieScattering)
-      .multiplyScalar(clampNonNegative(settings.mieScatteringMultiplier))
+      .multiplyScalar(clampNonNegative(sourceSettings.mieScatteringMultiplier))
     parameters.mieExtinction
       .copy(baseMieExtinction)
-      .multiplyScalar(clampNonNegative(settings.mieExtinctionMultiplier))
+      .multiplyScalar(clampNonNegative(sourceSettings.mieExtinctionMultiplier))
     parameters.absorptionExtinction
       .copy(baseAbsorptionExtinction)
-      .multiplyScalar(clampNonNegative(settings.absorptionExtinctionMultiplier))
+      .multiplyScalar(clampNonNegative(sourceSettings.absorptionExtinctionMultiplier))
 
-    parameters.groundAlbedo.setScalar(clamp01(settings.groundAlbedo))
-    parameters.solarIrradiance.copy(deriveSolarIrradiance(settings, solarIrradianceScratch))
-    parameters.sunAngularRadius = deriveSunAngularRadius(settings)
+    parameters.groundAlbedo.setScalar(clamp01(sourceSettings.groundAlbedo))
+    parameters.solarIrradiance.copy(deriveSolarIrradiance(sourceSettings, solarIrradianceScratch))
+    parameters.sunAngularRadius = deriveSunAngularRadius(sourceSettings)
 
-    lutNode.configure(parameters.clone())
+    return {
+      planetRadiusMeters,
+      parametersSnapshot: parameters.clone(),
+    }
+  }
 
+  const prepareLutSettings = (
+    sourceSettings: AtmosphereSettings,
+  ): { planetRadiusMeters: number; parametersSnapshot: AtmosphereParameters } => {
+    const prepared = configureParametersForSettings(sourceSettings)
+    lutNode.configure(prepared.parametersSnapshot.clone())
+    return prepared
+  }
+
+  const commitLutSettings = ({
+    planetRadiusMeters,
+    parametersSnapshot,
+  }: {
+    planetRadiusMeters: number
+    parametersSnapshot: AtmosphereParameters
+  }): void => {
     const sunDirectionValue = atmosphereContext.sunDirectionWorld.value.clone()
-    atmosphereContext = new AtmosphereContextNode(parameters.clone(), lutNode)
+    atmosphereContext = new AtmosphereContextNode(parametersSnapshot, lutNode)
     atmosphereContext.sunDirectionWorld.value.copy(sunDirectionValue)
     atmosphereContext.planetCenterWorld.value.set(0, -planetRadiusMeters * worldUnitsPerMeter, 0)
-    atmosphereContext.worldToUnitScene.value = parameters.worldToUnit * metersPerWorldUnit
+    atmosphereContext.worldToUnitScene.value = parametersSnapshot.worldToUnit * metersPerWorldUnit
     material.colorNode = buildColorNode()
     material.needsUpdate = true
   }
@@ -384,10 +407,11 @@ export const createAtmosphereSystem = (
 
   const syncSettings = (forceLutApply = false): boolean => {
     const nextLutSettingsKey = lutKey(settings)
-    const lutChanged = forceLutApply || nextLutSettingsKey !== lastLutSettingsKey
-    if (lutChanged) {
-      lastLutSettingsKey = nextLutSettingsKey
-      applyLutSettings()
+    const lutChanged = forceLutApply || nextLutSettingsKey !== appliedLutSettingsKey
+    if (lutChanged && rendererRef == null) {
+      const prepared = prepareLutSettings(settings)
+      commitLutSettings(prepared)
+      appliedLutSettingsKey = nextLutSettingsKey
     }
 
     applyVisualSettings()
@@ -401,7 +425,19 @@ export const createAtmosphereSystem = (
       return primePromise
     }
     primePromise = (async () => {
-      await lutNode.updateTextures(renderer)
+      while (true) {
+        const nextSettings = normalizeAtmosphereSettings(settings)
+        const nextLutSettingsKey = lutKey(nextSettings)
+        if (hasPrimedLuts && nextLutSettingsKey === appliedLutSettingsKey) {
+          break
+        }
+
+        const prepared = prepareLutSettings(nextSettings)
+        await lutNode.updateTextures(renderer)
+        commitLutSettings(prepared)
+        appliedLutSettingsKey = nextLutSettingsKey
+        hasPrimedLuts = true
+      }
     })().finally(() => {
       primePromise = null
     })

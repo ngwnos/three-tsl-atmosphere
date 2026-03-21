@@ -3121,40 +3121,54 @@ var createAtmosphereSystem = (scene, initialSettings = DEFAULT_ATMOSPHERE_SETTIN
   let rendererRef = null;
   let primePromise = null;
   let pendingReprimeTimeout = null;
-  let lastLutSettingsKey = "";
+  let appliedLutSettingsKey = "";
+  let hasPrimedLuts = false;
   const syncSunDiscUniforms = () => {
     const innerScale = Math.max(0.01, settings.sunDiscInnerScale);
     const outerScale = Math.max(innerScale + 0.01, settings.sunDiscOuterScale);
     const averageScale = (innerScale + outerScale) * 0.5;
     sunDiscAngularRadius.value = Math.max(1e-5, parameters.sunAngularRadius * averageScale);
   };
-  const applyLutSettings = () => {
+  const configureParametersForSettings = (sourceSettings) => {
     const planetRadiusMeters = clampPositive(
-      settings.planetRadiusM,
+      sourceSettings.planetRadiusM,
       DEFAULT_ATMOSPHERE_SETTINGS.planetRadiusM
     );
     const atmosphereHeightMeters = clampPositive(
-      settings.atmosphereHeightM,
+      sourceSettings.atmosphereHeightM,
       DEFAULT_ATMOSPHERE_SETTINGS.atmosphereHeightM
     );
     parameters.bottomRadius = planetRadiusMeters;
     parameters.topRadius = planetRadiusMeters + atmosphereHeightMeters;
-    parameters.rayleighDensity.layers[1].expScale = -1 / Math.max(1, settings.rayleighScaleHeightM);
-    parameters.mieDensity.layers[1].expScale = -1 / Math.max(1, settings.mieScaleHeightM);
-    parameters.miePhaseFunctionG = THREE.MathUtils.clamp(settings.miePhaseG, 0, 0.999);
-    parameters.rayleighScattering.copy(baseRayleigh).multiplyScalar(clampNonNegative(settings.rayleighScatteringMultiplier));
-    parameters.mieScattering.copy(baseMieScattering).multiplyScalar(clampNonNegative(settings.mieScatteringMultiplier));
-    parameters.mieExtinction.copy(baseMieExtinction).multiplyScalar(clampNonNegative(settings.mieExtinctionMultiplier));
-    parameters.absorptionExtinction.copy(baseAbsorptionExtinction).multiplyScalar(clampNonNegative(settings.absorptionExtinctionMultiplier));
-    parameters.groundAlbedo.setScalar(clamp01(settings.groundAlbedo));
-    parameters.solarIrradiance.copy(deriveSolarIrradiance(settings, solarIrradianceScratch));
-    parameters.sunAngularRadius = deriveSunAngularRadius(settings);
-    lutNode.configure(parameters.clone());
+    parameters.rayleighDensity.layers[1].expScale = -1 / Math.max(1, sourceSettings.rayleighScaleHeightM);
+    parameters.mieDensity.layers[1].expScale = -1 / Math.max(1, sourceSettings.mieScaleHeightM);
+    parameters.miePhaseFunctionG = THREE.MathUtils.clamp(sourceSettings.miePhaseG, 0, 0.999);
+    parameters.rayleighScattering.copy(baseRayleigh).multiplyScalar(clampNonNegative(sourceSettings.rayleighScatteringMultiplier));
+    parameters.mieScattering.copy(baseMieScattering).multiplyScalar(clampNonNegative(sourceSettings.mieScatteringMultiplier));
+    parameters.mieExtinction.copy(baseMieExtinction).multiplyScalar(clampNonNegative(sourceSettings.mieExtinctionMultiplier));
+    parameters.absorptionExtinction.copy(baseAbsorptionExtinction).multiplyScalar(clampNonNegative(sourceSettings.absorptionExtinctionMultiplier));
+    parameters.groundAlbedo.setScalar(clamp01(sourceSettings.groundAlbedo));
+    parameters.solarIrradiance.copy(deriveSolarIrradiance(sourceSettings, solarIrradianceScratch));
+    parameters.sunAngularRadius = deriveSunAngularRadius(sourceSettings);
+    return {
+      planetRadiusMeters,
+      parametersSnapshot: parameters.clone()
+    };
+  };
+  const prepareLutSettings = (sourceSettings) => {
+    const prepared = configureParametersForSettings(sourceSettings);
+    lutNode.configure(prepared.parametersSnapshot.clone());
+    return prepared;
+  };
+  const commitLutSettings = ({
+    planetRadiusMeters,
+    parametersSnapshot
+  }) => {
     const sunDirectionValue = atmosphereContext.sunDirectionWorld.value.clone();
-    atmosphereContext = new AtmosphereContextNode(parameters.clone(), lutNode);
+    atmosphereContext = new AtmosphereContextNode(parametersSnapshot, lutNode);
     atmosphereContext.sunDirectionWorld.value.copy(sunDirectionValue);
     atmosphereContext.planetCenterWorld.value.set(0, -planetRadiusMeters * worldUnitsPerMeter, 0);
-    atmosphereContext.worldToUnitScene.value = parameters.worldToUnit * metersPerWorldUnit;
+    atmosphereContext.worldToUnitScene.value = parametersSnapshot.worldToUnit * metersPerWorldUnit;
     material.colorNode = buildColorNode();
     material.needsUpdate = true;
   };
@@ -3188,10 +3202,11 @@ var createAtmosphereSystem = (scene, initialSettings = DEFAULT_ATMOSPHERE_SETTIN
   };
   const syncSettings = (forceLutApply = false) => {
     const nextLutSettingsKey = lutKey(settings);
-    const lutChanged = forceLutApply || nextLutSettingsKey !== lastLutSettingsKey;
-    if (lutChanged) {
-      lastLutSettingsKey = nextLutSettingsKey;
-      applyLutSettings();
+    const lutChanged = forceLutApply || nextLutSettingsKey !== appliedLutSettingsKey;
+    if (lutChanged && rendererRef == null) {
+      const prepared = prepareLutSettings(settings);
+      commitLutSettings(prepared);
+      appliedLutSettingsKey = nextLutSettingsKey;
     }
     applyVisualSettings();
     return lutChanged;
@@ -3202,7 +3217,18 @@ var createAtmosphereSystem = (scene, initialSettings = DEFAULT_ATMOSPHERE_SETTIN
       return primePromise;
     }
     primePromise = (async () => {
-      await lutNode.updateTextures(renderer);
+      while (true) {
+        const nextSettings = normalizeAtmosphereSettings(settings);
+        const nextLutSettingsKey = lutKey(nextSettings);
+        if (hasPrimedLuts && nextLutSettingsKey === appliedLutSettingsKey) {
+          break;
+        }
+        const prepared = prepareLutSettings(nextSettings);
+        await lutNode.updateTextures(renderer);
+        commitLutSettings(prepared);
+        appliedLutSettingsKey = nextLutSettingsKey;
+        hasPrimedLuts = true;
+      }
     })().finally(() => {
       primePromise = null;
     });
