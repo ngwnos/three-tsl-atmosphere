@@ -83,6 +83,14 @@ const setAtmosphereMode = (nextMode) => {
       ? DEFAULT_ATMOSPHERE_PHYSICAL_SETTINGS
       : DEFAULT_ATMOSPHERE_SETTINGS,
   )
+  void atmosphereRig
+    .prime(renderer)
+    .then(() => {
+      renderDisplayFrame()
+    })
+    .catch((error) => {
+      console.error('Failed to re-prime atmosphere mode.', error)
+    })
 }
 
 const toggleAtmosphereMode = () => {
