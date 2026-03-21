@@ -9,8 +9,18 @@ if (!(canvas instanceof HTMLCanvasElement)) {
 
 const scene = new THREE.Scene()
 const camera = new THREE.PerspectiveCamera(60, 1, 0.1, 100)
-camera.position.set(0, 1.7, 0)
-camera.lookAt(0, 1.7, -1)
+const cameraAnchor = new THREE.Vector3(0, 1.7, 0)
+const cameraEuler = new THREE.Euler(0, 0, 0, 'YXZ')
+const LOOK_SENSITIVITY = 0.004
+const MAX_PITCH = Math.PI * 0.48
+let dragging = false
+let activePointerId = null
+let yaw = 0
+let pitch = 0
+let lastPointerX = 0
+let lastPointerY = 0
+
+camera.position.copy(cameraAnchor)
 
 const renderer = new WebGPURenderer({ canvas, antialias: true, alpha: false })
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
@@ -28,6 +38,12 @@ const atmosphereRig = createAtmosphereRig(scene, {
   ambientIntensity: 0,
 })
 
+const applyCameraOrientation = () => {
+  camera.position.copy(cameraAnchor)
+  cameraEuler.set(pitch, yaw, 0)
+  camera.quaternion.setFromEuler(cameraEuler)
+}
+
 const handleResize = () => {
   const width = window.innerWidth
   const height = window.innerHeight
@@ -40,6 +56,56 @@ const renderDisplayFrame = () => {
   atmosphereRig.update(renderer, camera)
   renderer.render(scene, camera)
 }
+
+const stopDragging = () => {
+  if (dragging && activePointerId !== null && canvas.hasPointerCapture(activePointerId)) {
+    canvas.releasePointerCapture(activePointerId)
+  }
+  dragging = false
+  activePointerId = null
+  canvas.style.cursor = 'grab'
+}
+
+const updateLook = (deltaX, deltaY) => {
+  yaw -= deltaX * LOOK_SENSITIVITY
+  pitch = THREE.MathUtils.clamp(pitch - deltaY * LOOK_SENSITIVITY, -MAX_PITCH, MAX_PITCH)
+  applyCameraOrientation()
+}
+
+canvas.style.cursor = 'grab'
+canvas.style.touchAction = 'none'
+
+canvas.addEventListener('pointerdown', (event) => {
+  if (event.button !== 0) return
+  dragging = true
+  activePointerId = event.pointerId
+  lastPointerX = event.clientX
+  lastPointerY = event.clientY
+  canvas.setPointerCapture(event.pointerId)
+  canvas.style.cursor = 'grabbing'
+})
+
+canvas.addEventListener('pointermove', (event) => {
+  if (!dragging || event.pointerId !== activePointerId) return
+  const deltaX = event.clientX - lastPointerX
+  const deltaY = event.clientY - lastPointerY
+  lastPointerX = event.clientX
+  lastPointerY = event.clientY
+  updateLook(deltaX, deltaY)
+})
+
+canvas.addEventListener('pointerup', (event) => {
+  if (event.pointerId !== activePointerId) return
+  stopDragging()
+})
+
+canvas.addEventListener('pointercancel', (event) => {
+  if (event.pointerId !== activePointerId) return
+  stopDragging()
+})
+
+window.addEventListener('blur', stopDragging)
+window.addEventListener('resize', handleResize)
 
 const createIdeaOrcaCapture = () => ({
   describe: async () => ({
@@ -59,7 +125,6 @@ const createIdeaOrcaCapture = () => ({
   getVideoFrameSource: async () => canvas,
 })
 
-window.addEventListener('resize', handleResize)
 globalThis.__ideaOrcaCapture = createIdeaOrcaCapture()
 
 const bootstrap = async () => {
@@ -67,6 +132,7 @@ const bootstrap = async () => {
     throw new Error('WebGPU is not available in this browser.')
   }
 
+  applyCameraOrientation()
   await renderer.init()
   handleResize()
   await atmosphereRig.prime(renderer)
