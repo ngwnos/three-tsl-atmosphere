@@ -6,6 +6,7 @@ import { AtmosphereLightNode } from './AtmosphereLightNode'
 import {
   createAtmosphereSystem,
   DEFAULT_ATMOSPHERE_SETTINGS,
+  DEFAULT_ATMOSPHERE_PHYSICAL_SETTINGS,
   sunDirectionFromAngles,
   type AtmosphereSettings,
   type AtmosphereSystem,
@@ -109,6 +110,11 @@ const getRendererLightNodeLibrary = (renderer: WebGPURenderer): LightNodeLibrary
   return lightLibrary as LightNodeLibrary
 }
 
+const normalizeRigAtmosphereSettings = (settings: AtmosphereSettings): AtmosphereSettings =>
+  settings.mode === 'physical'
+    ? { ...DEFAULT_ATMOSPHERE_PHYSICAL_SETTINGS, ...settings }
+    : { ...DEFAULT_ATMOSPHERE_SETTINGS, ...settings }
+
 const ensureAtmosphereLightNodeRegistered = (renderer: WebGPURenderer): void => {
   const lightLibrary = getRendererLightNodeLibrary(renderer)
   if (!lightLibrary) {
@@ -124,10 +130,9 @@ export const createAtmosphereRig = (
   scene: THREE.Scene,
   options: AtmosphereRigOptions = {},
 ): AtmosphereRig => {
-  let baseAtmosphereSettings: AtmosphereSettings = {
-    ...DEFAULT_ATMOSPHERE_SETTINGS,
-    ...options.atmosphereSettings,
-  }
+  let baseAtmosphereSettings: AtmosphereSettings = normalizeRigAtmosphereSettings(
+    options.atmosphereSettings ?? DEFAULT_ATMOSPHERE_SETTINGS,
+  )
 
   const skyLayer = THREE.MathUtils.clamp(
     Math.floor(options.skyLayer ?? DEFAULT_SKY_LAYER),
@@ -328,7 +333,7 @@ export const createAtmosphereRig = (
   }
 
   const setAtmosphereSettings = (next: AtmosphereSettings): void => {
-    baseAtmosphereSettings = { ...next }
+    baseAtmosphereSettings = normalizeRigAtmosphereSettings(next)
     if (syncAtmosphereToSun) {
       syncSunState()
       return

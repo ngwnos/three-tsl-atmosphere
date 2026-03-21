@@ -1,7 +1,7 @@
 import * as THREE from 'three'
 import type { WebGPURenderer } from 'three/webgpu'
 
-export type AtmosphereSettings = {
+export type AtmosphereVisualSettings = {
   skyIntensity: number
   skyTintR: number
   skyTintG: number
@@ -12,8 +12,9 @@ export type AtmosphereSettings = {
   sunDiscColorB: number
   sunDiscInnerScale: number
   sunDiscOuterScale: number
-  planetRadiusKm: number
-  atmosphereHeightKm: number
+}
+
+export type AtmosphereMediumSettings = {
   rayleighScaleHeightM: number
   mieScaleHeightM: number
   miePhaseG: number
@@ -23,6 +24,25 @@ export type AtmosphereSettings = {
   absorptionExtinctionMultiplier: number
   groundAlbedo: number
 }
+
+export type AtmosphereArtisticSettings = AtmosphereVisualSettings &
+  AtmosphereMediumSettings & {
+    mode?: 'artistic'
+    planetRadiusKm: number
+    atmosphereHeightKm: number
+  }
+
+export type AtmospherePhysicalSettings = AtmosphereVisualSettings &
+  AtmosphereMediumSettings & {
+    mode: 'physical'
+    planetRadiusM: number
+    atmosphereHeightM: number
+    starRadiusM: number
+    planetStarDistanceM: number
+    starEffectiveTemperatureK: number
+  }
+
+export type AtmosphereSettings = AtmosphereArtisticSettings | AtmospherePhysicalSettings
 
 export type AtmosphereSystemOptions = {
   worldUnitsPerMeter?: number
@@ -40,7 +60,20 @@ export type AtmosphereSystem = {
   dispose: () => void
 }
 
-export declare const DEFAULT_ATMOSPHERE_SETTINGS: AtmosphereSettings
+export declare const DEFAULT_ATMOSPHERE_SETTINGS: AtmosphereArtisticSettings
+export declare const DEFAULT_ATMOSPHERE_PHYSICAL_SETTINGS: AtmospherePhysicalSettings
+
+export declare const derivePhysicalSolarIrradiance: (
+  settings: Pick<
+    AtmospherePhysicalSettings,
+    'starRadiusM' | 'planetStarDistanceM' | 'starEffectiveTemperatureK'
+  >,
+  target?: THREE.Vector3,
+) => THREE.Vector3
+
+export declare const derivePhysicalSunAngularRadius: (
+  settings: Pick<AtmospherePhysicalSettings, 'starRadiusM' | 'planetStarDistanceM'>,
+) => number
 
 export declare const sunDirectionFromAngles: (
   altitudeDeg: number,
