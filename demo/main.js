@@ -1,6 +1,10 @@
 import * as THREE from 'three'
 import { WebGPURenderer } from 'three/webgpu'
-import { createAtmosphereRig } from 'three-tsl-atmosphere'
+import {
+  createAtmosphereRig,
+  DEFAULT_ATMOSPHERE_SETTINGS,
+  DEFAULT_ATMOSPHERE_PHYSICAL_SETTINGS,
+} from 'three-tsl-atmosphere'
 
 const canvas = document.querySelector('#app')
 if (!(canvas instanceof HTMLCanvasElement)) {
@@ -26,6 +30,7 @@ let yaw = 0
 let pitch = 0
 let lastPointerX = 0
 let lastPointerY = 0
+let atmosphereMode = 'artistic'
 
 camera.position.copy(cameraAnchor)
 
@@ -69,6 +74,19 @@ const handleResize = () => {
 const renderDisplayFrame = () => {
   atmosphereRig.update(renderer, camera)
   renderer.render(scene, camera)
+}
+
+const setAtmosphereMode = (nextMode) => {
+  atmosphereMode = nextMode
+  atmosphereRig.setAtmosphereSettings(
+    nextMode === 'physical'
+      ? DEFAULT_ATMOSPHERE_PHYSICAL_SETTINGS
+      : DEFAULT_ATMOSPHERE_SETTINGS,
+  )
+}
+
+const toggleAtmosphereMode = () => {
+  setAtmosphereMode(atmosphereMode === 'physical' ? 'artistic' : 'physical')
 }
 
 const stopDragging = () => {
@@ -162,6 +180,21 @@ canvas.addEventListener(
 
 window.addEventListener('blur', stopDragging)
 window.addEventListener('resize', handleResize)
+window.addEventListener('keydown', (event) => {
+  if (
+    event.defaultPrevented ||
+    event.repeat ||
+    event.ctrlKey ||
+    event.altKey ||
+    event.metaKey ||
+    event.key !== '1'
+  ) {
+    return
+  }
+
+  event.preventDefault()
+  toggleAtmosphereMode()
+})
 
 const createIdeaOrcaCapture = () => ({
   describe: async () => ({
