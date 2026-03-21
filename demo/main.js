@@ -67,8 +67,8 @@ const stopDragging = () => {
 }
 
 const updateLook = (deltaX, deltaY) => {
-  yaw -= deltaX * LOOK_SENSITIVITY
-  pitch = THREE.MathUtils.clamp(pitch - deltaY * LOOK_SENSITIVITY, -MAX_PITCH, MAX_PITCH)
+  yaw += deltaX * LOOK_SENSITIVITY
+  pitch = THREE.MathUtils.clamp(pitch + deltaY * LOOK_SENSITIVITY, -MAX_PITCH, MAX_PITCH)
   applyCameraOrientation()
 }
 
