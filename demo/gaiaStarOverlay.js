@@ -5,6 +5,7 @@ import {
   If,
   Return,
   atomicAdd,
+  dot,
   float,
   instanceIndex,
   positionLocal,
@@ -85,6 +86,8 @@ export class GaiaStarOverlay {
     this.invFpScale = uniform(1 / FIXED_POINT_SCALE)
     this.viewProjU = uniform(new THREE.Matrix4(), 'mat4')
     this.cameraPositionU = uniform(new THREE.Vector3())
+    this.planetCenterU = uniform(new THREE.Vector3())
+    this.planetRadiusU = uniform(1)
     this.fovBoostU = uniform(1)
     this.starDistanceU = uniform(STAR_SPHERE_RADIUS)
     this.starExposureU = uniform(STAR_EXPOSURE)
@@ -106,6 +109,11 @@ export class GaiaStarOverlay {
 
   setScale(scale) {
     this.starScaleU.value = Math.max(0.1, scale)
+  }
+
+  setPlanet(center, radius) {
+    this.planetCenterU.value.copy(center)
+    this.planetRadiusU.value = Math.max(0, radius)
   }
 
   async load(url) {
@@ -222,6 +230,17 @@ export class GaiaStarOverlay {
       const direction = this.directionBuf.element(index).xyz.normalize()
       const color = this.colorBuf.element(index).xyz
       const magnitude = this.magnitudeBuf.element(index)
+      const cameraToPlanet = this.cameraPositionU.sub(this.planetCenterU).toVar()
+      const halfB = dot(cameraToPlanet, direction).toVar()
+      const c = dot(cameraToPlanet, cameraToPlanet)
+        .sub(this.planetRadiusU.mul(this.planetRadiusU))
+        .toVar()
+      const discriminant = halfB.mul(halfB).sub(c).toVar()
+
+      If(discriminant.greaterThanEqual(0).and(halfB.lessThan(0)), () => {
+        Return()
+      })
+
       const positionWorld = this.cameraPositionU.add(direction.mul(this.starDistanceU))
       const clip = this.viewProjU.mul(vec4(positionWorld, 1))
 

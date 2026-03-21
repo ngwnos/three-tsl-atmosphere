@@ -45,6 +45,7 @@ const zoomBeforeDirection = new THREE.Vector3()
 const zoomAfterDirection = new THREE.Vector3()
 const zoomRotation = new THREE.Quaternion()
 const zoomedCameraQuaternion = new THREE.Quaternion()
+const planetCenter = new THREE.Vector3()
 const clock = new THREE.Clock()
 const MAX_PITCH = Math.PI * 0.48
 const MIN_FOV = 20
@@ -99,6 +100,8 @@ const applyVisualExposure = () => {
     skyIntensity: baseSettings.skyIntensity * exposure,
     sunDiscIntensity: baseSettings.sunDiscIntensity * exposure,
   })
+  planetCenter.set(0, -baseSettings.planetRadiusM, 0)
+  starOverlay.setPlanet(planetCenter, baseSettings.planetRadiusM)
   starOverlay.setExposure(exposure)
   starOverlay.setScale(starScale)
 }
