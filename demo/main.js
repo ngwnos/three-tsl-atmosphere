@@ -27,9 +27,9 @@ const MAX_SUN_ALTITUDE_DEG = 90
 const MIN_EXPOSURE = 0.125
 const MAX_EXPOSURE = 16
 const EXPOSURE_STEP_STOPS = 1 / 3
-const MIN_STAR_SCALE = 0.5
-const MAX_STAR_SCALE = 4
-const STAR_SCALE_STEP = 1.15
+const MIN_STAR_SCALE = 0.25
+const MAX_STAR_SCALE = 8
+const STAR_SCALE_STEP = Math.SQRT2
 
 const canvas = document.querySelector('#app')
 if (!(canvas instanceof HTMLCanvasElement)) {

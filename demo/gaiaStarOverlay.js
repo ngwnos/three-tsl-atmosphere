@@ -259,7 +259,7 @@ export class GaiaStarOverlay {
         const radiusPx = float(0.55)
           .add(smoothstep(0.0008, 0.15, flux).mul(1.85))
           .mul(this.starScaleU)
-          .clamp(0.45, 3.4)
+          .clamp(0.25, 6)
 
         const fp = this.fpScaleU.toFloat()
 
