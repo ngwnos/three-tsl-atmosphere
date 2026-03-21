@@ -17,6 +17,17 @@ body {
   height: 100vh;
 }
 
+#control-panel {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  z-index: 10;
+}
+
+#control-panel .tp-dfwv {
+  min-width: 280px;
+}
+
 pre {
   margin: 0;
   padding: 16px;

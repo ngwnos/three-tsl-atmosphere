@@ -9,7 +9,8 @@
     "preview:orca": "vite preview"
   },
   "dependencies": {
-    "three": "^0.183.0"
+    "three": "^0.183.0",
+    "tweakpane": "^4.0.5"
   },
   "devDependencies": {
     "vite": "^7.3.1"

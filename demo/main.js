@@ -1,5 +1,6 @@
 import * as THREE from 'three'
 import { WebGPURenderer } from 'three/webgpu'
+import { Pane } from 'tweakpane'
 import { createAtmosphereRig, DEFAULT_ATMOSPHERE_SETTINGS } from 'three-tsl-atmosphere'
 import { GaiaStarOverlay } from './gaiaStarOverlay.js'
 
@@ -37,6 +38,10 @@ const GAIA_CHUNK_URLS = Array.from({ length: 5 }, (_, index) =>
 const canvas = document.querySelector('#app')
 if (!(canvas instanceof HTMLCanvasElement)) {
   throw new Error('Missing demo canvas')
+}
+const controlPanelContainer = document.querySelector('#control-panel')
+if (!(controlPanelContainer instanceof HTMLDivElement)) {
+  throw new Error('Missing control panel container')
 }
 
 const scene = new THREE.Scene()
@@ -90,11 +95,33 @@ const atmosphereRig = createAtmosphereRig(scene, {
   ambientIntensity: 0,
 })
 const starOverlay = new GaiaStarOverlay()
+const pane = new Pane({
+  container: controlPanelContainer,
+  title: 'Atmosphere',
+})
+const paneState = {
+  preset: 'earth',
+  sunAltitudeDeg: sunState.altitudeDeg,
+  sunAzimuthDeg: sunState.azimuthDeg,
+  exposure,
+  starScale,
+  altitudeKm: altitudeMeters / 1000,
+}
 
 const getActiveAtmosphereSettings = () =>
   atmospherePreset === 'alternate'
     ? ALT_ATMOSPHERE_SETTINGS
     : EARTH_ATMOSPHERE_SETTINGS
+
+const syncPaneState = () => {
+  paneState.preset = atmospherePreset
+  paneState.sunAltitudeDeg = sunState.altitudeDeg
+  paneState.sunAzimuthDeg = sunState.azimuthDeg
+  paneState.exposure = exposure
+  paneState.starScale = starScale
+  paneState.altitudeKm = altitudeMeters / 1000
+  pane.refresh()
+}
 
 const applyVisualExposure = () => {
   const baseSettings = getActiveAtmosphereSettings()
@@ -145,6 +172,7 @@ const renderDisplayFrame = () => {
 const setAtmospherePreset = (nextPreset) => {
   atmospherePreset = nextPreset
   applyVisualExposure()
+  syncPaneState()
   void atmosphereRig
     .prime(renderer)
     .then(() => {
@@ -166,6 +194,7 @@ const adjustSunAltitude = (deltaDeg) => {
     MAX_SUN_ALTITUDE_DEG,
   )
   atmosphereRig.setSunAngles(sunState.altitudeDeg, sunState.azimuthDeg)
+  syncPaneState()
 }
 
 const adjustExposure = (deltaStops) => {
@@ -175,6 +204,7 @@ const adjustExposure = (deltaStops) => {
     MAX_EXPOSURE,
   )
   applyVisualExposure()
+  syncPaneState()
 }
 
 const adjustStarScale = (scaleFactor) => {
@@ -184,6 +214,7 @@ const adjustStarScale = (scaleFactor) => {
     MAX_STAR_SCALE,
   )
   starOverlay.setScale(starScale)
+  syncPaneState()
 }
 
 const stopDragging = () => {
@@ -248,10 +279,101 @@ const updateAltitude = (deltaSeconds) => {
     MAX_ALTITUDE_METERS,
   )
   syncCameraAltitude()
+  syncPaneState()
+}
+
+const buildControlPanel = () => {
+  const sceneFolder = pane.addFolder({
+    title: 'Scene',
+    expanded: true,
+  })
+  sceneFolder
+    .addBinding(paneState, 'preset', {
+      label: 'Preset',
+      options: {
+        Earth: 'earth',
+        Alternate: 'alternate',
+      },
+    })
+    .on('change', (event) => {
+      setAtmospherePreset(event.value)
+    })
+  sceneFolder
+    .addBinding(paneState, 'sunAltitudeDeg', {
+      label: 'Sun alt',
+      min: MIN_SUN_ALTITUDE_DEG,
+      max: MAX_SUN_ALTITUDE_DEG,
+      step: 0.1,
+    })
+    .on('change', (event) => {
+      sunState.altitudeDeg = event.value
+      atmosphereRig.setSunAngles(sunState.altitudeDeg, sunState.azimuthDeg)
+      syncPaneState()
+    })
+  sceneFolder
+    .addBinding(paneState, 'sunAzimuthDeg', {
+      label: 'Sun az',
+      min: -180,
+      max: 180,
+      step: 0.1,
+    })
+    .on('change', (event) => {
+      sunState.azimuthDeg = event.value
+      atmosphereRig.setSunAngles(sunState.altitudeDeg, sunState.azimuthDeg)
+      syncPaneState()
+    })
+  sceneFolder
+    .addBinding(paneState, 'exposure', {
+      label: 'Exposure',
+      min: MIN_EXPOSURE,
+      max: MAX_EXPOSURE,
+      step: 0.01,
+    })
+    .on('change', (event) => {
+      exposure = event.value
+      applyVisualExposure()
+      syncPaneState()
+    })
+
+  const starsFolder = pane.addFolder({
+    title: 'Stars',
+    expanded: true,
+  })
+  starsFolder
+    .addBinding(paneState, 'starScale', {
+      label: 'Scale',
+      min: MIN_STAR_SCALE,
+      max: MAX_STAR_SCALE,
+      step: 0.01,
+    })
+    .on('change', (event) => {
+      starScale = event.value
+      starOverlay.setScale(starScale)
+      syncPaneState()
+    })
+
+  const cameraFolder = pane.addFolder({
+    title: 'Camera',
+    expanded: false,
+  })
+  cameraFolder
+    .addBinding(paneState, 'altitudeKm', {
+      label: 'Altitude km',
+      min: MIN_ALTITUDE_METERS / 1000,
+      max: MAX_ALTITUDE_METERS / 1000,
+      step: 0.1,
+    })
+    .on('change', (event) => {
+      altitudeMeters = event.value * 1000
+      syncCameraAltitude()
+      syncPaneState()
+    })
 }
 
 canvas.style.cursor = 'grab'
 canvas.style.touchAction = 'none'
+buildControlPanel()
+syncPaneState()
 
 canvas.addEventListener('pointerdown', (event) => {
   if (event.button !== 0) return
