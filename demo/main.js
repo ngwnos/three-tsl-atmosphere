@@ -11,7 +11,6 @@ const scene = new THREE.Scene()
 const camera = new THREE.PerspectiveCamera(60, 1, 0.1, 100)
 const cameraAnchor = new THREE.Vector3(0, 1.7, 0)
 const cameraEuler = new THREE.Euler(0, 0, 0, 'YXZ')
-const LOOK_SENSITIVITY = 0.004
 const MAX_PITCH = Math.PI * 0.48
 let dragging = false
 let activePointerId = null
@@ -66,9 +65,21 @@ const stopDragging = () => {
   canvas.style.cursor = 'grab'
 }
 
+const getLookScale = () => {
+  const width = Math.max(1, canvas.clientWidth || window.innerWidth)
+  const height = Math.max(1, canvas.clientHeight || window.innerHeight)
+  const verticalFov = THREE.MathUtils.degToRad(camera.fov)
+  const horizontalFov = 2 * Math.atan(Math.tan(verticalFov * 0.5) * camera.aspect)
+  return {
+    yawPerPixel: horizontalFov / width,
+    pitchPerPixel: verticalFov / height,
+  }
+}
+
 const updateLook = (deltaX, deltaY) => {
-  yaw += deltaX * LOOK_SENSITIVITY
-  pitch = THREE.MathUtils.clamp(pitch + deltaY * LOOK_SENSITIVITY, -MAX_PITCH, MAX_PITCH)
+  const { yawPerPixel, pitchPerPixel } = getLookScale()
+  yaw += deltaX * yawPerPixel
+  pitch = THREE.MathUtils.clamp(pitch + deltaY * pitchPerPixel, -MAX_PITCH, MAX_PITCH)
   applyCameraOrientation()
 }
 
