@@ -3093,10 +3093,6 @@ var createAtmosphereSystem = (scene, initialSettings = DEFAULT_ATMOSPHERE_SETTIN
   );
   const sunDiscAngularRadius = uniform4(parameters.sunAngularRadius);
   const geometry = new THREE.SphereGeometry(skyDomeRadiusMeters * worldUnitsPerMeter, 64, 32);
-  const material = new MeshBasicNodeMaterial();
-  material.side = THREE.BackSide;
-  material.depthTest = false;
-  material.depthWrite = false;
   const buildColorNode = () => Fn4(() => {
     const worldViewDir = normalize(positionWorld.sub(cameraPosition)).toVar();
     const worldSunDir = normalize(atmosphereContext.sunDirectionWorld).toVar();
@@ -3111,7 +3107,15 @@ var createAtmosphereSystem = (scene, initialSettings = DEFAULT_ATMOSPHERE_SETTIN
     const sunDiscLuminance = getSolarLuminance().mul(vec36(sunDiscColor)).mul(sunDisc).mul(skyTransfer.get("transmittance")).toVar();
     return vec45(skyLuminance.add(sunDiscLuminance), float4(1));
   })().context({ atmosphere: atmosphereContext });
-  material.colorNode = buildColorNode();
+  const createSkyMaterial = () => {
+    const material2 = new MeshBasicNodeMaterial();
+    material2.side = THREE.BackSide;
+    material2.depthTest = false;
+    material2.depthWrite = false;
+    material2.colorNode = buildColorNode();
+    return material2;
+  };
+  let material = createSkyMaterial();
   const skyMesh = new THREE.Mesh(geometry, material);
   skyMesh.frustumCulled = false;
   skyMesh.renderOrder = -100;
@@ -3169,8 +3173,10 @@ var createAtmosphereSystem = (scene, initialSettings = DEFAULT_ATMOSPHERE_SETTIN
     atmosphereContext.sunDirectionWorld.value.copy(sunDirectionValue);
     atmosphereContext.planetCenterWorld.value.set(0, -planetRadiusMeters * worldUnitsPerMeter, 0);
     atmosphereContext.worldToUnitScene.value = parametersSnapshot.worldToUnit * metersPerWorldUnit;
-    material.colorNode = buildColorNode();
-    material.needsUpdate = true;
+    const nextMaterial = createSkyMaterial();
+    skyMesh.material = nextMaterial;
+    material.dispose();
+    material = nextMaterial;
   };
   const applyVisualSettings = () => {
     skyIntensity.value = clampNonNegative(settings.skyIntensity);

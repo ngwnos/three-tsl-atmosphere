@@ -250,10 +250,6 @@ export const createAtmosphereSystem = (
   const sunDiscAngularRadius = uniform(parameters.sunAngularRadius)
 
   const geometry = new THREE.SphereGeometry(skyDomeRadiusMeters * worldUnitsPerMeter, 64, 32)
-  const material = new MeshBasicNodeMaterial()
-  material.side = THREE.BackSide
-  material.depthTest = false
-  material.depthWrite = false
 
   const buildColorNode = () =>
     Fn(() => {
@@ -284,7 +280,16 @@ export const createAtmosphereSystem = (
       return vec4(skyLuminance.add(sunDiscLuminance), float(1))
     })().context({ atmosphere: atmosphereContext })
 
-  material.colorNode = buildColorNode()
+  const createSkyMaterial = (): MeshBasicNodeMaterial => {
+    const material = new MeshBasicNodeMaterial()
+    material.side = THREE.BackSide
+    material.depthTest = false
+    material.depthWrite = false
+    material.colorNode = buildColorNode()
+    return material
+  }
+
+  let material = createSkyMaterial()
 
   const skyMesh = new THREE.Mesh(geometry, material)
   skyMesh.frustumCulled = false
@@ -371,8 +376,10 @@ export const createAtmosphereSystem = (
     atmosphereContext.sunDirectionWorld.value.copy(sunDirectionValue)
     atmosphereContext.planetCenterWorld.value.set(0, -planetRadiusMeters * worldUnitsPerMeter, 0)
     atmosphereContext.worldToUnitScene.value = parametersSnapshot.worldToUnit * metersPerWorldUnit
-    material.colorNode = buildColorNode()
-    material.needsUpdate = true
+    const nextMaterial = createSkyMaterial()
+    skyMesh.material = nextMaterial
+    material.dispose()
+    material = nextMaterial
   }
 
   const applyVisualSettings = (): void => {
