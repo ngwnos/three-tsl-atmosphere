@@ -86,6 +86,7 @@ export class GaiaStarOverlay {
     this.fpScaleU = uniform(FIXED_POINT_SCALE, 'uint')
     this.invFpScale = uniform(1 / FIXED_POINT_SCALE)
     this.viewProjU = uniform(new THREE.Matrix4(), 'mat4')
+    this.equatorialToLocalU = uniform(new THREE.Matrix4(), 'mat4')
     this.cameraPositionU = uniform(new THREE.Vector3())
     this.planetCenterU = uniform(new THREE.Vector3())
     this.planetRadiusU = uniform(1)
@@ -109,6 +110,10 @@ export class GaiaStarOverlay {
 
   setExposure(exposure) {
     this.starExposureU.value = STAR_EXPOSURE * Math.max(0, exposure)
+  }
+
+  setEquatorialToLocal(matrix4) {
+    this.equatorialToLocalU.value.copy(matrix4)
   }
 
   setScaleRange(minScale, maxScale) {
@@ -259,7 +264,10 @@ export class GaiaStarOverlay {
       const accGAtomic = storage(this.accGSBA, 'uint', this.accSize).toAtomic()
       const accBAtomic = storage(this.accBSBA, 'uint', this.accSize).toAtomic()
 
-      const direction = this.directionBuf.element(index).xyz.normalize()
+      const direction = this.equatorialToLocalU
+        .mul(vec4(this.directionBuf.element(index).xyz, 0))
+        .xyz
+        .normalize()
       const color = this.colorBuf.element(index).xyz
       const magnitude = this.magnitudeBuf.element(index)
       const cameraToPlanet = this.cameraPositionU.sub(this.planetCenterU).toVar()

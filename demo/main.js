@@ -3,6 +3,7 @@ import { WebGPURenderer } from 'three/webgpu'
 import { Pane } from 'tweakpane'
 import { createAtmosphereRig, DEFAULT_ATMOSPHERE_SETTINGS } from 'three-tsl-atmosphere'
 import { GaiaStarOverlay } from './gaiaStarOverlay.js'
+import { SkyGridOverlay } from './skyGridOverlay.js'
 
 const EARTH_ATMOSPHERE_SETTINGS = DEFAULT_ATMOSPHERE_SETTINGS
 const ALT_ATMOSPHERE_SETTINGS = {
@@ -31,6 +32,8 @@ const EXPOSURE_STEP_STOPS = 1 / 3
 const MIN_STAR_SCALE_LIMIT = 0.1
 const MAX_STAR_SCALE_LIMIT = 8
 const STAR_SCALE_STEP = Math.SQRT2
+const OBSERVER_LATITUDE_DEG = 37.7749
+const LOCAL_SIDEREAL_ANGLE_DEG = 25
 const GAIA_CHUNK_URLS = Array.from({ length: 5 }, (_, index) =>
   `/data/gaia/chunk_${String(index).padStart(4, '0')}.bin`,
 )
@@ -56,6 +59,10 @@ const zoomAfterDirection = new THREE.Vector3()
 const zoomRotation = new THREE.Quaternion()
 const zoomedCameraQuaternion = new THREE.Quaternion()
 const planetCenter = new THREE.Vector3()
+const equatorialTiltQuaternion = new THREE.Quaternion()
+const siderealQuaternion = new THREE.Quaternion()
+const equatorialToLocalQuaternion = new THREE.Quaternion()
+const equatorialToLocalMatrix = new THREE.Matrix4()
 const MAX_PITCH = Math.PI * 0.48
 const MIN_FOV = 20
 const MAX_FOV = 150
@@ -84,6 +91,10 @@ const movementState = {
   up: false,
   down: false,
 }
+const gridState = {
+  showAltAzGrid: false,
+  showRaDecGrid: false,
+}
 let resolvePreviewReadyPromise = null
 const previewReadyPromise = new Promise((resolve) => {
   resolvePreviewReadyPromise = resolve
@@ -105,6 +116,10 @@ const atmosphereRig = createAtmosphereRig(scene, {
   ambientIntensity: 0,
 })
 const starOverlay = new GaiaStarOverlay()
+const gridOverlay = new SkyGridOverlay({
+  equatorialToLocalQuaternion,
+})
+gridOverlay.addToScene(scene)
 const pane = new Pane({
   container: controlPanelContainer,
   title: 'Atmosphere',
@@ -117,6 +132,21 @@ const paneState = {
   minStarScale,
   maxStarScale,
   altitudeKm: altitudeMeters / 1000,
+  showAltAzGrid: gridState.showAltAzGrid,
+  showRaDecGrid: gridState.showRaDecGrid,
+}
+
+const updateEquatorialFrame = () => {
+  equatorialTiltQuaternion.setFromAxisAngle(
+    new THREE.Vector3(1, 0, 0),
+    THREE.MathUtils.degToRad(90 - OBSERVER_LATITUDE_DEG),
+  )
+  siderealQuaternion.setFromAxisAngle(
+    new THREE.Vector3(0, 1, 0),
+    THREE.MathUtils.degToRad(LOCAL_SIDEREAL_ANGLE_DEG),
+  )
+  equatorialToLocalQuaternion.copy(equatorialTiltQuaternion).multiply(siderealQuaternion)
+  equatorialToLocalMatrix.makeRotationFromQuaternion(equatorialToLocalQuaternion)
 }
 
 const syncPaneState = () => {
@@ -127,6 +157,8 @@ const syncPaneState = () => {
   paneState.minStarScale = minStarScale
   paneState.maxStarScale = maxStarScale
   paneState.altitudeKm = altitudeMeters / 1000
+  paneState.showAltAzGrid = gridState.showAltAzGrid
+  paneState.showRaDecGrid = gridState.showRaDecGrid
   pane.refresh()
 }
 
@@ -138,6 +170,7 @@ const applyVisualExposure = () => {
   })
   planetCenter.set(0, -atmosphereSettings.planetRadiusM, 0)
   starOverlay.setPlanet(planetCenter, atmosphereSettings.planetRadiusM)
+  starOverlay.setEquatorialToLocal(equatorialToLocalMatrix)
   starOverlay.setExposure(exposure)
   starOverlay.setScaleRange(minStarScale, maxStarScale)
 }
@@ -170,6 +203,7 @@ const handleResize = () => {
 
 const renderDisplayFrame = () => {
   renderer.clear()
+  gridOverlay.setCameraPosition(camera.position)
   atmosphereRig.update(renderer, camera)
   renderer.render(scene, camera)
   if (starsEnabled) {
@@ -300,6 +334,7 @@ const renderCaptureFrame = async (elapsedTime, width, height) => {
     await atmosphereRig.prime(renderer)
     renderer.setRenderTarget(resources.sceneTarget)
     renderer.clear()
+    gridOverlay.setCameraPosition(camera.position)
     atmosphereRig.update(renderer, camera)
     renderer.render(scene, camera)
     if (starsEnabled) {
@@ -655,6 +690,24 @@ const buildControlPanel = () => {
     expanded: true,
   })
   starsFolder
+    .addBinding(paneState, 'showAltAzGrid', {
+      label: 'Alt/Az grid',
+    })
+    .on('change', (event) => {
+      gridState.showAltAzGrid = event.value
+      gridOverlay.setAltAzEnabled(gridState.showAltAzGrid)
+      syncPaneState()
+    })
+  starsFolder
+    .addBinding(paneState, 'showRaDecGrid', {
+      label: 'RA/Dec grid',
+    })
+    .on('change', (event) => {
+      gridState.showRaDecGrid = event.value
+      gridOverlay.setRaDecEnabled(gridState.showRaDecGrid)
+      syncPaneState()
+    })
+  starsFolder
     .addBinding(paneState, 'minStarScale', {
       label: 'Min size',
       min: MIN_STAR_SCALE_LIMIT,
@@ -699,6 +752,9 @@ const buildControlPanel = () => {
 
 canvas.style.cursor = 'grab'
 canvas.style.touchAction = 'none'
+updateEquatorialFrame()
+gridOverlay.setAltAzEnabled(gridState.showAltAzGrid)
+gridOverlay.setRaDecEnabled(gridState.showRaDecGrid)
 buildControlPanel()
 syncPaneState()
 
