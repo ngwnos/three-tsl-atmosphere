@@ -66,6 +66,7 @@ let pitch = 0
 let lastPointerX = 0
 let lastPointerY = 0
 let atmospherePreset = 'earth'
+const atmosphereSettings = { ...EARTH_ATMOSPHERE_SETTINGS }
 let altitudeMeters = MIN_ALTITUDE_METERS
 let exposure = 1
 let minStarScale = 0.55
@@ -110,11 +111,6 @@ const paneState = {
   altitudeKm: altitudeMeters / 1000,
 }
 
-const getActiveAtmosphereSettings = () =>
-  atmospherePreset === 'alternate'
-    ? ALT_ATMOSPHERE_SETTINGS
-    : EARTH_ATMOSPHERE_SETTINGS
-
 const syncPaneState = () => {
   paneState.preset = atmospherePreset
   paneState.sunAltitudeDeg = sunState.altitudeDeg
@@ -127,14 +123,13 @@ const syncPaneState = () => {
 }
 
 const applyVisualExposure = () => {
-  const baseSettings = getActiveAtmosphereSettings()
   atmosphereRig.setAtmosphereSettings({
-    ...baseSettings,
-    skyIntensity: baseSettings.skyIntensity * exposure,
-    sunDiscIntensity: baseSettings.sunDiscIntensity * exposure,
+    ...atmosphereSettings,
+    skyIntensity: atmosphereSettings.skyIntensity * exposure,
+    sunDiscIntensity: atmosphereSettings.sunDiscIntensity * exposure,
   })
-  planetCenter.set(0, -baseSettings.planetRadiusM, 0)
-  starOverlay.setPlanet(planetCenter, baseSettings.planetRadiusM)
+  planetCenter.set(0, -atmosphereSettings.planetRadiusM, 0)
+  starOverlay.setPlanet(planetCenter, atmosphereSettings.planetRadiusM)
   starOverlay.setExposure(exposure)
   starOverlay.setScaleRange(minStarScale, maxStarScale)
 }
@@ -174,6 +169,10 @@ const renderDisplayFrame = () => {
 
 const setAtmospherePreset = (nextPreset) => {
   atmospherePreset = nextPreset
+  Object.assign(
+    atmosphereSettings,
+    nextPreset === 'alternate' ? ALT_ATMOSPHERE_SETTINGS : EARTH_ATMOSPHERE_SETTINGS,
+  )
   applyVisualExposure()
   syncPaneState()
   void atmosphereRig
@@ -290,6 +289,13 @@ const updateAltitude = (deltaSeconds) => {
   syncPaneState()
 }
 
+const bindAtmosphereSetting = (folder, key, options = {}) => {
+  folder.addBinding(atmosphereSettings, key, options).on('change', () => {
+    applyVisualExposure()
+    syncPaneState()
+  })
+}
+
 const buildControlPanel = () => {
   const sceneFolder = pane.addFolder({
     title: 'Scene',
@@ -342,6 +348,159 @@ const buildControlPanel = () => {
       applyVisualExposure()
       syncPaneState()
     })
+
+  const visualFolder = pane.addFolder({
+    title: 'Visual',
+    expanded: false,
+  })
+  bindAtmosphereSetting(visualFolder, 'skyIntensity', {
+    label: 'Sky int',
+    min: 0,
+    max: 4,
+    step: 0.01,
+  })
+  bindAtmosphereSetting(visualFolder, 'skyTintR', {
+    label: 'Sky R',
+    min: 0,
+    max: 2,
+    step: 0.01,
+  })
+  bindAtmosphereSetting(visualFolder, 'skyTintG', {
+    label: 'Sky G',
+    min: 0,
+    max: 2,
+    step: 0.01,
+  })
+  bindAtmosphereSetting(visualFolder, 'skyTintB', {
+    label: 'Sky B',
+    min: 0,
+    max: 2,
+    step: 0.01,
+  })
+  bindAtmosphereSetting(visualFolder, 'sunDiscIntensity', {
+    label: 'Sun int',
+    min: 0,
+    max: 4,
+    step: 0.01,
+  })
+  bindAtmosphereSetting(visualFolder, 'sunDiscColorR', {
+    label: 'Sun R',
+    min: 0,
+    max: 2,
+    step: 0.01,
+  })
+  bindAtmosphereSetting(visualFolder, 'sunDiscColorG', {
+    label: 'Sun G',
+    min: 0,
+    max: 2,
+    step: 0.01,
+  })
+  bindAtmosphereSetting(visualFolder, 'sunDiscColorB', {
+    label: 'Sun B',
+    min: 0,
+    max: 2,
+    step: 0.01,
+  })
+  bindAtmosphereSetting(visualFolder, 'sunDiscInnerScale', {
+    label: 'Sun in',
+    min: 0.1,
+    max: 5,
+    step: 0.01,
+  })
+  bindAtmosphereSetting(visualFolder, 'sunDiscOuterScale', {
+    label: 'Sun out',
+    min: 0.1,
+    max: 6,
+    step: 0.01,
+  })
+
+  const mediumFolder = pane.addFolder({
+    title: 'Medium',
+    expanded: false,
+  })
+  bindAtmosphereSetting(mediumFolder, 'rayleighScaleHeightM', {
+    label: 'Ray h',
+    min: 100,
+    max: 30000,
+    step: 100,
+  })
+  bindAtmosphereSetting(mediumFolder, 'mieScaleHeightM', {
+    label: 'Mie h',
+    min: 50,
+    max: 10000,
+    step: 50,
+  })
+  bindAtmosphereSetting(mediumFolder, 'miePhaseG', {
+    label: 'Mie g',
+    min: 0,
+    max: 0.99,
+    step: 0.001,
+  })
+  bindAtmosphereSetting(mediumFolder, 'rayleighScatteringMultiplier', {
+    label: 'Ray mult',
+    min: 0,
+    max: 6,
+    step: 0.01,
+  })
+  bindAtmosphereSetting(mediumFolder, 'mieScatteringMultiplier', {
+    label: 'Mie scat',
+    min: 0,
+    max: 6,
+    step: 0.01,
+  })
+  bindAtmosphereSetting(mediumFolder, 'mieExtinctionMultiplier', {
+    label: 'Mie ext',
+    min: 0,
+    max: 6,
+    step: 0.01,
+  })
+  bindAtmosphereSetting(mediumFolder, 'absorptionExtinctionMultiplier', {
+    label: 'Abs ext',
+    min: 0,
+    max: 6,
+    step: 0.01,
+  })
+  bindAtmosphereSetting(mediumFolder, 'groundAlbedo', {
+    label: 'Albedo',
+    min: 0,
+    max: 1,
+    step: 0.01,
+  })
+
+  const astronomicalFolder = pane.addFolder({
+    title: 'Astronomical',
+    expanded: false,
+  })
+  bindAtmosphereSetting(astronomicalFolder, 'planetRadiusM', {
+    label: 'Planet R',
+    min: 500000,
+    max: 30000000,
+    step: 10000,
+  })
+  bindAtmosphereSetting(astronomicalFolder, 'atmosphereHeightM', {
+    label: 'Atmo H',
+    min: 1000,
+    max: 200000,
+    step: 1000,
+  })
+  bindAtmosphereSetting(astronomicalFolder, 'starRadiusM', {
+    label: 'Star R',
+    min: 100000000,
+    max: 3000000000,
+    step: 1000000,
+  })
+  bindAtmosphereSetting(astronomicalFolder, 'planetStarDistanceM', {
+    label: 'Distance',
+    min: 1000000000,
+    max: 500000000000,
+    step: 100000000,
+  })
+  bindAtmosphereSetting(astronomicalFolder, 'starEffectiveTemperatureK', {
+    label: 'Star K',
+    min: 1000,
+    max: 20000,
+    step: 10,
+  })
 
   const starsFolder = pane.addFolder({
     title: 'Stars',
