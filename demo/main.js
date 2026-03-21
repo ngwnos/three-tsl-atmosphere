@@ -11,6 +11,11 @@ const scene = new THREE.Scene()
 const camera = new THREE.PerspectiveCamera(60, 1, 0.1, 100)
 const cameraAnchor = new THREE.Vector3(0, 1.7, 0)
 const cameraEuler = new THREE.Euler(0, 0, 0, 'YXZ')
+const zoomPointer = new THREE.Vector3()
+const zoomBeforeDirection = new THREE.Vector3()
+const zoomAfterDirection = new THREE.Vector3()
+const zoomRotation = new THREE.Quaternion()
+const zoomedCameraQuaternion = new THREE.Quaternion()
 const MAX_PITCH = Math.PI * 0.48
 const MIN_FOV = 20
 const MAX_FOV = 90
@@ -44,6 +49,13 @@ const applyCameraOrientation = () => {
   camera.position.copy(cameraAnchor)
   cameraEuler.set(pitch, yaw, 0)
   camera.quaternion.setFromEuler(cameraEuler)
+}
+
+const setCameraOrientationFromQuaternion = (quaternion) => {
+  cameraEuler.setFromQuaternion(quaternion, 'YXZ')
+  yaw = cameraEuler.y
+  pitch = THREE.MathUtils.clamp(cameraEuler.x, -MAX_PITCH, MAX_PITCH)
+  applyCameraOrientation()
 }
 
 const handleResize = () => {
@@ -86,10 +98,25 @@ const updateLook = (deltaX, deltaY) => {
   applyCameraOrientation()
 }
 
-const updateZoom = (deltaY) => {
+const getWorldDirectionAtPointer = (clientX, clientY, target) => {
+  const rect = canvas.getBoundingClientRect()
+  const width = Math.max(1, rect.width)
+  const height = Math.max(1, rect.height)
+  const ndcX = ((clientX - rect.left) / width) * 2 - 1
+  const ndcY = -(((clientY - rect.top) / height) * 2 - 1)
+  zoomPointer.set(ndcX, ndcY, 0.5)
+  return target.copy(zoomPointer).unproject(camera).sub(camera.position).normalize()
+}
+
+const updateZoom = (deltaY, clientX, clientY) => {
+  getWorldDirectionAtPointer(clientX, clientY, zoomBeforeDirection)
   const zoomFactor = Math.exp(deltaY * ZOOM_SENSITIVITY)
   camera.fov = THREE.MathUtils.clamp(camera.fov * zoomFactor, MIN_FOV, MAX_FOV)
   camera.updateProjectionMatrix()
+  getWorldDirectionAtPointer(clientX, clientY, zoomAfterDirection)
+  zoomRotation.setFromUnitVectors(zoomAfterDirection, zoomBeforeDirection)
+  zoomedCameraQuaternion.copy(zoomRotation).multiply(camera.quaternion)
+  setCameraOrientationFromQuaternion(zoomedCameraQuaternion)
 }
 
 canvas.style.cursor = 'grab'
@@ -128,7 +155,7 @@ canvas.addEventListener(
   'wheel',
   (event) => {
     event.preventDefault()
-    updateZoom(event.deltaY)
+    updateZoom(event.deltaY, event.clientX, event.clientY)
   },
   { passive: false },
 )
