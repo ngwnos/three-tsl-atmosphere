@@ -24,8 +24,6 @@ const REFERENCE_FOV_DEG = 60
 const STAR_EXPOSURE = 1.6
 const STAR_SCALE = 1
 
-const clamp01 = (value) => Math.min(1, Math.max(0, value))
-
 const bpRpToRgb = (bpRp) => {
   if (!Number.isFinite(bpRp)) {
     return [1, 1, 1]
@@ -54,23 +52,6 @@ const bpRpToRgb = (bpRp) => {
 
   const t = Math.min(1, (colorVal - 1.5) / 1)
   return [1, 0.7 - 0.4 * t, 0.2 - 0.1 * t]
-}
-
-const computeStarVisibility = (sunAltitudeDeg) => {
-  const altitudeRad = THREE.MathUtils.degToRad(sunAltitudeDeg)
-  const daylightTerm = Math.max(0, Math.sin(altitudeRad))
-  const daylightIlluminanceLux = 120000 * Math.pow(daylightTerm, 0.5)
-
-  // Continuous twilight sky-glow approximation from civil through astronomical twilight.
-  // This avoids a hard horizon gate while still crushing stars in bright sky conditions.
-  const twilightMix = clamp01((sunAltitudeDeg + 18) / 18)
-  const twilightIlluminanceLux = 10 ** THREE.MathUtils.lerp(-4, 2, twilightMix)
-
-  // Characteristic illuminance where stars begin to become meaningfully visible.
-  const adaptationLux = 0.002
-  const skyIlluminanceLux = daylightIlluminanceLux + twilightIlluminanceLux
-
-  return adaptationLux / (adaptationLux + skyIlluminanceLux)
 }
 
 const computeFovBoost = (fovDeg) =>
@@ -104,7 +85,6 @@ export class GaiaStarOverlay {
     this.invFpScale = uniform(1 / FIXED_POINT_SCALE)
     this.viewProjU = uniform(new THREE.Matrix4(), 'mat4')
     this.cameraPositionU = uniform(new THREE.Vector3())
-    this.nightVisibilityU = uniform(0)
     this.fovBoostU = uniform(1)
     this.starDistanceU = uniform(STAR_SPHERE_RADIUS)
     this.starExposureU = uniform(STAR_EXPOSURE)
@@ -267,7 +247,6 @@ export class GaiaStarOverlay {
         const flux = pow(float(10), magnitude.mul(-0.4))
         const contributionScale = flux
           .mul(this.starExposureU)
-          .mul(this.nightVisibilityU)
           .mul(this.fovBoostU)
 
         const radiusPx = float(0.55)
@@ -402,7 +381,6 @@ export class GaiaStarOverlay {
     this.tmpViewProj.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse)
     this.viewProjU.value.copy(this.tmpViewProj)
     this.cameraPositionU.value.copy(camera.position)
-    this.nightVisibilityU.value = clamp01(computeStarVisibility(sunAltitudeDeg))
     this.fovBoostU.value = computeFovBoost(camera.fov)
   }
 
