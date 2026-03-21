@@ -43,6 +43,8 @@ const controlPanelContainer = document.querySelector('#control-panel')
 if (!(controlPanelContainer instanceof HTMLDivElement)) {
   throw new Error('Missing control panel container')
 }
+const urlParams = new URLSearchParams(window.location.search)
+const starsEnabled = urlParams.get('stars') !== 'off'
 
 const scene = new THREE.Scene()
 const camera = new THREE.PerspectiveCamera(60, 1, 0.1, 100)
@@ -54,7 +56,6 @@ const zoomAfterDirection = new THREE.Vector3()
 const zoomRotation = new THREE.Quaternion()
 const zoomedCameraQuaternion = new THREE.Quaternion()
 const planetCenter = new THREE.Vector3()
-const clock = new THREE.Clock()
 const MAX_PITCH = Math.PI * 0.48
 const MIN_FOV = 20
 const MAX_FOV = 150
@@ -63,14 +64,17 @@ let dragging = false
 let activePointerId = null
 let yaw = 0
 let pitch = 0
+let lastFrameTimeMs = 0
 let lastPointerX = 0
 let lastPointerY = 0
+let isPreviewReady = false
 let atmospherePreset = 'earth'
 const atmosphereSettings = { ...EARTH_ATMOSPHERE_SETTINGS }
 let altitudeMeters = MIN_ALTITUDE_METERS
 let exposure = 1
 let minStarScale = 0.55
 let maxStarScale = 2.4
+let captureResources = null
 const sunState = {
   altitudeDeg: 24,
   azimuthDeg: -35,
@@ -80,6 +84,10 @@ const movementState = {
   up: false,
   down: false,
 }
+let resolvePreviewReadyPromise = null
+const previewReadyPromise = new Promise((resolve) => {
+  resolvePreviewReadyPromise = resolve
+})
 
 camera.position.copy(cameraAnchor)
 
@@ -164,7 +172,147 @@ const renderDisplayFrame = () => {
   renderer.clear()
   atmosphereRig.update(renderer, camera)
   renderer.render(scene, camera)
-  starOverlay.render(renderer, camera, sunState.altitudeDeg)
+  if (starsEnabled) {
+    starOverlay.render(renderer, camera, sunState.altitudeDeg)
+  }
+}
+
+const disposeCaptureResources = () => {
+  if (!captureResources) {
+    return
+  }
+
+  captureResources.postScene.remove(captureResources.postQuad)
+  captureResources.postQuad.geometry.dispose()
+  captureResources.postQuad.material.dispose()
+  captureResources.sceneTarget.dispose()
+  captureResources.outputTarget.dispose()
+  captureResources.previewCanvas.remove()
+  captureResources = null
+}
+
+const ensureCaptureResources = (width, height) => {
+  const resolvedWidth = Math.max(1, Math.floor(width))
+  const resolvedHeight = Math.max(1, Math.floor(height))
+  if (
+    captureResources &&
+    captureResources.width === resolvedWidth &&
+    captureResources.height === resolvedHeight
+  ) {
+    return captureResources
+  }
+
+  disposeCaptureResources()
+
+  const sceneTarget = new THREE.RenderTarget(resolvedWidth, resolvedHeight, {
+    format: THREE.RGBAFormat,
+    type: THREE.UnsignedByteType,
+    colorSpace: renderer.outputColorSpace,
+    depthBuffer: true,
+    stencilBuffer: false,
+    samples: 0,
+  })
+  const outputTarget = new THREE.RenderTarget(resolvedWidth, resolvedHeight, {
+    format: THREE.RGBAFormat,
+    type: THREE.UnsignedByteType,
+    colorSpace: renderer.outputColorSpace,
+    depthBuffer: false,
+    stencilBuffer: false,
+    samples: 0,
+  })
+  renderer.initRenderTarget(sceneTarget)
+  renderer.initRenderTarget(outputTarget)
+
+  const postScene = new THREE.Scene()
+  const postCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1)
+  const postQuad = new THREE.Mesh(
+    new THREE.PlaneGeometry(2, 2),
+    new THREE.MeshBasicMaterial({
+      map: sceneTarget.texture,
+      transparent: true,
+    }),
+  )
+  postScene.add(postQuad)
+
+  const previewCanvas = document.createElement('canvas')
+  previewCanvas.width = resolvedWidth
+  previewCanvas.height = resolvedHeight
+  previewCanvas.style.position = 'fixed'
+  previewCanvas.style.left = '-99999px'
+  previewCanvas.style.top = '-99999px'
+  previewCanvas.style.width = `${resolvedWidth}px`
+  previewCanvas.style.height = `${resolvedHeight}px`
+  previewCanvas.style.pointerEvents = 'none'
+  previewCanvas.setAttribute('aria-hidden', 'true')
+  document.body.appendChild(previewCanvas)
+
+  captureResources = {
+    width: resolvedWidth,
+    height: resolvedHeight,
+    sceneTarget,
+    outputTarget,
+    postScene,
+    postCamera,
+    postQuad,
+    previewCanvas,
+  }
+  return captureResources
+}
+
+const readPackedRenderTargetRgba = async (target, width, height) => {
+  const pixels = await renderer.readRenderTargetPixelsAsync(target, 0, 0, width, height)
+  if (!(pixels instanceof Uint8Array)) {
+    throw new Error('Expected Uint8Array render target pixels.')
+  }
+
+  const packedBytesPerRow = width * 4
+  const packedByteLength = packedBytesPerRow * height
+  if (pixels.byteLength === packedByteLength) {
+    return new Uint8Array(pixels).buffer
+  }
+
+  const paddedBytesPerRow = Math.ceil(packedBytesPerRow / 256) * 256
+  const minimumExpectedByteLength = ((height - 1) * paddedBytesPerRow) + packedBytesPerRow
+  if (pixels.byteLength < minimumExpectedByteLength) {
+    throw new Error(
+      `Readback buffer is smaller than expected: got ${pixels.byteLength} bytes, need at least ${minimumExpectedByteLength}.`,
+    )
+  }
+
+  const packedPixels = new Uint8Array(packedByteLength)
+  for (let rowIndex = 0; rowIndex < height; rowIndex += 1) {
+    const sourceStart = rowIndex * paddedBytesPerRow
+    const sourceEnd = sourceStart + packedBytesPerRow
+    const targetStart = rowIndex * packedBytesPerRow
+    packedPixels.set(pixels.subarray(sourceStart, sourceEnd), targetStart)
+  }
+
+  return packedPixels.buffer
+}
+
+const renderCaptureFrame = async (elapsedTime, width, height) => {
+  const resources = ensureCaptureResources(width, height)
+  const previousAspect = camera.aspect
+
+  camera.aspect = resources.width / Math.max(1, resources.height)
+  camera.updateProjectionMatrix()
+  try {
+    await atmosphereRig.prime(renderer)
+    renderer.setRenderTarget(resources.sceneTarget)
+    renderer.clear()
+    atmosphereRig.update(renderer, camera)
+    renderer.render(scene, camera)
+    if (starsEnabled) {
+      starOverlay.render(renderer, camera, sunState.altitudeDeg)
+    }
+
+    renderer.setRenderTarget(resources.outputTarget)
+    renderer.render(resources.postScene, resources.postCamera)
+    renderer.setRenderTarget(null)
+  } finally {
+    camera.aspect = previousAspect
+    camera.updateProjectionMatrix()
+  }
 }
 
 const setAtmospherePreset = (nextPreset) => {
@@ -679,18 +827,153 @@ const createIdeaOrcaCapture = () => ({
     width: canvas.clientWidth || window.innerWidth,
     height: canvas.clientHeight || window.innerHeight,
   }),
-  prepare: async () => {
+  prepare: async ({ width, height }) => {
     handleResize()
-    renderDisplayFrame()
+    await renderCaptureFrame(0, width, height)
   },
-  renderFrame: async () => {
+  renderFrame: async ({ elapsedTime }) => {
     handleResize()
-    renderDisplayFrame()
+    const width = captureResources?.width ?? canvas.clientWidth ?? window.innerWidth
+    const height = captureResources?.height ?? canvas.clientHeight ?? window.innerHeight
+    await renderCaptureFrame(elapsedTime, width, height)
   },
-  getVideoFrameSource: async () => canvas,
+  readFrameRgba: async () => {
+    if (!captureResources) {
+      throw new Error('Capture surface is not prepared.')
+    }
+    return readPackedRenderTargetRgba(
+      captureResources.outputTarget,
+      captureResources.width,
+      captureResources.height,
+    )
+  },
+  getVideoFrameSource: async () => {
+    if (!captureResources) {
+      throw new Error('Capture surface is not prepared.')
+    }
+    const context = captureResources.previewCanvas.getContext('2d')
+    if (!context) {
+      throw new Error('2D preview canvas context is unavailable.')
+    }
+    const rgba = await readPackedRenderTargetRgba(
+      captureResources.outputTarget,
+      captureResources.width,
+      captureResources.height,
+    )
+    const pixels = new Uint8ClampedArray(rgba)
+    const imageData = new ImageData(
+      pixels,
+      captureResources.width,
+      captureResources.height,
+    )
+    context.putImageData(imageData, 0, 0)
+    return captureResources.previewCanvas
+  },
+})
+
+const sampleCanvasStats = () => {
+  const sampleWidth = 64
+  const sampleHeight = 64
+  const sampleCanvas = document.createElement('canvas')
+  sampleCanvas.width = sampleWidth
+  sampleCanvas.height = sampleHeight
+  const context = sampleCanvas.getContext('2d', { willReadFrequently: true })
+  if (!context) {
+    throw new Error('Failed to create 2D sample context.')
+  }
+
+  context.drawImage(canvas, 0, 0, sampleWidth, sampleHeight)
+  const { data } = context.getImageData(0, 0, sampleWidth, sampleHeight)
+  let sumLuminance = 0
+  let maxLuminance = 0
+  let nonBlackCount = 0
+
+  for (let index = 0; index < data.length; index += 4) {
+    const r = data[index] / 255
+    const g = data[index + 1] / 255
+    const b = data[index + 2] / 255
+    const luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b
+    sumLuminance += luminance
+    maxLuminance = Math.max(maxLuminance, luminance)
+    if (luminance > 0.002) {
+      nonBlackCount += 1
+    }
+  }
+
+  const pixelCount = sampleWidth * sampleHeight
+  return {
+    averageLuminance: sumLuminance / pixelCount,
+    maxLuminance,
+    nonBlackFraction: nonBlackCount / pixelCount,
+  }
+}
+
+const waitForFrames = async (frameCount = 2) => {
+  for (let index = 0; index < frameCount; index += 1) {
+    await new Promise((resolve) => {
+      requestAnimationFrame(() => resolve(undefined))
+    })
+  }
+}
+
+const settleAfterSettingChange = async () => {
+  await atmosphereRig.prime(renderer)
+  await waitForFrames(3)
+  renderDisplayFrame()
+  await waitForFrames(2)
+}
+
+const createTestApi = () => ({
+  isReady: () => isPreviewReady,
+  waitUntilReady: () => previewReadyPromise,
+  getState: () => ({
+    atmospherePreset,
+    atmosphereSettings: { ...atmosphereSettings },
+    sunState: { ...sunState },
+    exposure,
+    minStarScale,
+    maxStarScale,
+    altitudeMeters,
+    cameraFov: camera.fov,
+    starsEnabled,
+  }),
+  sampleCanvasStats,
+  async setAtmosphereSetting(key, value) {
+    if (!(key in atmosphereSettings)) {
+      throw new Error(`Unknown atmosphere setting: ${String(key)}`)
+    }
+    atmosphereSettings[key] = value
+    applyVisualExposure()
+    syncPaneState()
+    await settleAfterSettingChange()
+    return sampleCanvasStats()
+  },
+  async setSunAngles(altitudeDeg, azimuthDeg = sunState.azimuthDeg) {
+    sunState.altitudeDeg = altitudeDeg
+    sunState.azimuthDeg = azimuthDeg
+    atmosphereRig.setSunAngles(sunState.altitudeDeg, sunState.azimuthDeg)
+    syncPaneState()
+    await waitForFrames(2)
+    renderDisplayFrame()
+    return sampleCanvasStats()
+  },
+  async setExposure(nextExposure) {
+    exposure = THREE.MathUtils.clamp(nextExposure, MIN_EXPOSURE, MAX_EXPOSURE)
+    applyVisualExposure()
+    syncPaneState()
+    await waitForFrames(2)
+    renderDisplayFrame()
+    return sampleCanvasStats()
+  },
+  async setPreset(nextPreset) {
+    setAtmospherePreset(nextPreset)
+    await settleAfterSettingChange()
+    return sampleCanvasStats()
+  },
 })
 
 globalThis.__ideaOrcaCapture = createIdeaOrcaCapture()
+globalThis.__threeTslAtmosphereTest = createTestApi()
 
 const bootstrap = async () => {
   if (!navigator.gpu) {
@@ -702,15 +985,20 @@ const bootstrap = async () => {
   handleResize()
   await Promise.all([
     atmosphereRig.prime(renderer),
-    starOverlay.load(GAIA_CHUNK_URLS),
+    starsEnabled ? starOverlay.load(GAIA_CHUNK_URLS) : Promise.resolve(),
   ])
   applyVisualExposure()
+  renderDisplayFrame()
 
+  isPreviewReady = true
+  resolvePreviewReadyPromise?.()
   window.dispatchEvent(new Event('idea-orca-preview-ready'))
 
-  clock.start()
+  lastFrameTimeMs = performance.now()
   renderer.setAnimationLoop(() => {
-    const deltaSeconds = Math.min(clock.getDelta(), 0.1)
+    const nowMs = performance.now()
+    const deltaSeconds = Math.min((nowMs - lastFrameTimeMs) / 1000, 0.1)
+    lastFrameTimeMs = nowMs
     updateAltitude(deltaSeconds)
     renderDisplayFrame()
   })

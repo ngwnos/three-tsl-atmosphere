@@ -26,7 +26,8 @@
     "dev:lib": "tsup src/index.ts --format esm --watch",
     "dev:demo": "bun run --cwd demo dev",
     "preview": "bun run --cwd demo preview",
-    "preview:orca": "bun run --cwd demo preview"
+    "preview:orca": "bun run --cwd demo preview",
+    "test:webgpu": "xvfb-run -a playwright test"
   },
   "keywords": [
     "three",
@@ -41,7 +42,9 @@
     "three": "^0.182.0 || ^0.183.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.58.2",
     "@types/three": "^0.183.0",
+    "pngjs": "^7.0.0",
     "three": "^0.183.0",
     "tsup": "^8.5.0",
     "typescript": "^5.9.3"

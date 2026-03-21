@@ -63,7 +63,7 @@ export class AtmosphereContextBaseNode extends ThreeNode {
     return 'AtmosphereContextBaseNode'
   }
 
-  readonly parameters: AtmosphereParameters
+  parameters: AtmosphereParameters
 
   worldToUnit: Node<Dimensionless>
   solarIrradiance: Node<IrradianceSpectrum>
@@ -86,6 +86,11 @@ export class AtmosphereContextBaseNode extends ThreeNode {
 
   constructor(parameters = new AtmosphereParameters()) {
     super(null)
+    this.parameters = parameters
+    this.applyParameters(parameters)
+  }
+
+  applyParameters(parameters: AtmosphereParameters): void {
     this.parameters = parameters
 
     const {

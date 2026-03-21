@@ -371,9 +371,7 @@ export const createAtmosphereSystem = (
     planetRadiusMeters: number
     parametersSnapshot: AtmosphereParameters
   }): void => {
-    const sunDirectionValue = atmosphereContext.sunDirectionWorld.value.clone()
-    atmosphereContext = new AtmosphereContextNode(parametersSnapshot, lutNode)
-    atmosphereContext.sunDirectionWorld.value.copy(sunDirectionValue)
+    atmosphereContext.applyParameters(parametersSnapshot)
     atmosphereContext.planetCenterWorld.value.set(0, -planetRadiusMeters * worldUnitsPerMeter, 0)
     atmosphereContext.worldToUnitScene.value = parametersSnapshot.worldToUnit * metersPerWorldUnit
     const nextMaterial = createSkyMaterial()

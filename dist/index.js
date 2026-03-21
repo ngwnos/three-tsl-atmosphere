@@ -276,6 +276,10 @@ var AtmosphereContextBaseNode = class _AtmosphereContextBaseNode extends ThreeNo
   constructor(parameters = new AtmosphereParameters()) {
     super(null);
     this.parameters = parameters;
+    this.applyParameters(parameters);
+  }
+  applyParameters(parameters) {
+    this.parameters = parameters;
     const {
       worldToUnit,
       solarIrradiance,
@@ -3168,9 +3172,7 @@ var createAtmosphereSystem = (scene, initialSettings = DEFAULT_ATMOSPHERE_SETTIN
     planetRadiusMeters,
     parametersSnapshot
   }) => {
-    const sunDirectionValue = atmosphereContext.sunDirectionWorld.value.clone();
-    atmosphereContext = new AtmosphereContextNode(parametersSnapshot, lutNode);
-    atmosphereContext.sunDirectionWorld.value.copy(sunDirectionValue);
+    atmosphereContext.applyParameters(parametersSnapshot);
     atmosphereContext.planetCenterWorld.value.set(0, -planetRadiusMeters * worldUnitsPerMeter, 0);
     atmosphereContext.worldToUnitScene.value = parametersSnapshot.worldToUnit * metersPerWorldUnit;
     const nextMaterial = createSkyMaterial();
