@@ -1,6 +1,7 @@
 import * as THREE from 'three'
 import { WebGPURenderer } from 'three/webgpu'
 import { createAtmosphereRig, DEFAULT_ATMOSPHERE_SETTINGS } from 'three-tsl-atmosphere'
+import { GaiaStarOverlay } from './gaiaStarOverlay.js'
 
 const EARTH_ATMOSPHERE_SETTINGS = DEFAULT_ATMOSPHERE_SETTINGS
 const ALT_ATMOSPHERE_SETTINGS = {
@@ -20,6 +21,9 @@ const MIN_ALTITUDE_METERS = 1.7
 const MAX_ALTITUDE_METERS = 2_000_000
 const MIN_ALTITUDE_SPEED_MPS = 4
 const ALTITUDE_SPEED_FACTOR = 0.2
+const SUN_ALTITUDE_STEP_DEG = 2
+const MIN_SUN_ALTITUDE_DEG = -90
+const MAX_SUN_ALTITUDE_DEG = 90
 
 const canvas = document.querySelector('#app')
 if (!(canvas instanceof HTMLCanvasElement)) {
@@ -48,6 +52,11 @@ let lastPointerX = 0
 let lastPointerY = 0
 let atmospherePreset = 'earth'
 let altitudeMeters = MIN_ALTITUDE_METERS
+const sunState = {
+  altitudeDeg: 24,
+  azimuthDeg: -35,
+  intensity: 6,
+}
 const movementState = {
   up: false,
   down: false,
@@ -57,20 +66,18 @@ camera.position.copy(cameraAnchor)
 
 const renderer = new WebGPURenderer({ canvas, antialias: true, alpha: false })
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
+renderer.autoClear = false
 
 const atmosphereRig = createAtmosphereRig(scene, {
   atmosphereSettings: EARTH_ATMOSPHERE_SETTINGS,
   skyLayer: 0,
-  sun: {
-    altitudeDeg: 24,
-    azimuthDeg: -35,
-    intensity: 6,
-  },
+  sun: sunState,
   environment: {
     enabled: false,
   },
   ambientIntensity: 0,
 })
+const starOverlay = new GaiaStarOverlay()
 
 const applyCameraOrientation = () => {
   camera.position.copy(cameraAnchor)
@@ -99,8 +106,10 @@ const handleResize = () => {
 }
 
 const renderDisplayFrame = () => {
+  renderer.clear()
   atmosphereRig.update(renderer, camera)
   renderer.render(scene, camera)
+  starOverlay.render(renderer, camera, sunState.altitudeDeg)
 }
 
 const setAtmospherePreset = (nextPreset) => {
@@ -122,6 +131,15 @@ const setAtmospherePreset = (nextPreset) => {
 
 const toggleAtmospherePreset = () => {
   setAtmospherePreset(atmospherePreset === 'alternate' ? 'earth' : 'alternate')
+}
+
+const adjustSunAltitude = (deltaDeg) => {
+  sunState.altitudeDeg = THREE.MathUtils.clamp(
+    sunState.altitudeDeg + deltaDeg,
+    MIN_SUN_ALTITUDE_DEG,
+    MAX_SUN_ALTITUDE_DEG,
+  )
+  atmosphereRig.setSunAngles(sunState.altitudeDeg, sunState.azimuthDeg)
 }
 
 const stopDragging = () => {
@@ -236,7 +254,23 @@ window.addEventListener('blur', () => {
 })
 window.addEventListener('resize', handleResize)
 window.addEventListener('keydown', (event) => {
-  if (event.defaultPrevented || event.repeat || event.ctrlKey || event.altKey || event.metaKey) {
+  if (event.defaultPrevented || event.ctrlKey || event.altKey || event.metaKey) {
+    return
+  }
+
+  if (event.key === '+' || event.key === '=') {
+    event.preventDefault()
+    adjustSunAltitude(SUN_ALTITUDE_STEP_DEG)
+    return
+  }
+
+  if (event.key === '-' || event.key === '_') {
+    event.preventDefault()
+    adjustSunAltitude(-SUN_ALTITUDE_STEP_DEG)
+    return
+  }
+
+  if (event.repeat) {
     return
   }
 
@@ -297,7 +331,10 @@ const bootstrap = async () => {
   applyCameraOrientation()
   await renderer.init()
   handleResize()
-  await atmosphereRig.prime(renderer)
+  await Promise.all([
+    atmosphereRig.prime(renderer),
+    starOverlay.load('/data/gaia/chunk_0000.bin'),
+  ])
 
   window.dispatchEvent(new Event('idea-orca-preview-ready'))
 
