@@ -28,8 +28,8 @@ const MAX_SUN_ALTITUDE_DEG = 90
 const MIN_EXPOSURE = 0.125
 const MAX_EXPOSURE = 16
 const EXPOSURE_STEP_STOPS = 1 / 3
-const MIN_STAR_SCALE = 0.25
-const MAX_STAR_SCALE = 8
+const MIN_STAR_SCALE_LIMIT = 0.1
+const MAX_STAR_SCALE_LIMIT = 8
 const STAR_SCALE_STEP = Math.SQRT2
 const GAIA_CHUNK_URLS = Array.from({ length: 5 }, (_, index) =>
   `/data/gaia/chunk_${String(index).padStart(4, '0')}.bin`,
@@ -68,7 +68,8 @@ let lastPointerY = 0
 let atmospherePreset = 'earth'
 let altitudeMeters = MIN_ALTITUDE_METERS
 let exposure = 1
-let starScale = 1
+let minStarScale = 0.55
+let maxStarScale = 2.4
 const sunState = {
   altitudeDeg: 24,
   azimuthDeg: -35,
@@ -104,7 +105,8 @@ const paneState = {
   sunAltitudeDeg: sunState.altitudeDeg,
   sunAzimuthDeg: sunState.azimuthDeg,
   exposure,
-  starScale,
+  minStarScale,
+  maxStarScale,
   altitudeKm: altitudeMeters / 1000,
 }
 
@@ -118,7 +120,8 @@ const syncPaneState = () => {
   paneState.sunAltitudeDeg = sunState.altitudeDeg
   paneState.sunAzimuthDeg = sunState.azimuthDeg
   paneState.exposure = exposure
-  paneState.starScale = starScale
+  paneState.minStarScale = minStarScale
+  paneState.maxStarScale = maxStarScale
   paneState.altitudeKm = altitudeMeters / 1000
   pane.refresh()
 }
@@ -133,7 +136,7 @@ const applyVisualExposure = () => {
   planetCenter.set(0, -baseSettings.planetRadiusM, 0)
   starOverlay.setPlanet(planetCenter, baseSettings.planetRadiusM)
   starOverlay.setExposure(exposure)
-  starOverlay.setScale(starScale)
+  starOverlay.setScaleRange(minStarScale, maxStarScale)
 }
 
 const applyCameraOrientation = () => {
@@ -207,13 +210,18 @@ const adjustExposure = (deltaStops) => {
   syncPaneState()
 }
 
-const adjustStarScale = (scaleFactor) => {
-  starScale = THREE.MathUtils.clamp(
-    starScale * scaleFactor,
-    MIN_STAR_SCALE,
-    MAX_STAR_SCALE,
+const adjustStarScaleRange = (scaleFactor) => {
+  minStarScale = THREE.MathUtils.clamp(
+    minStarScale * scaleFactor,
+    MIN_STAR_SCALE_LIMIT,
+    MAX_STAR_SCALE_LIMIT,
   )
-  starOverlay.setScale(starScale)
+  maxStarScale = THREE.MathUtils.clamp(
+    maxStarScale * scaleFactor,
+    minStarScale,
+    MAX_STAR_SCALE_LIMIT,
+  )
+  starOverlay.setScaleRange(minStarScale, maxStarScale)
   syncPaneState()
 }
 
@@ -340,15 +348,27 @@ const buildControlPanel = () => {
     expanded: true,
   })
   starsFolder
-    .addBinding(paneState, 'starScale', {
-      label: 'Scale',
-      min: MIN_STAR_SCALE,
-      max: MAX_STAR_SCALE,
+    .addBinding(paneState, 'minStarScale', {
+      label: 'Min size',
+      min: MIN_STAR_SCALE_LIMIT,
+      max: MAX_STAR_SCALE_LIMIT,
       step: 0.01,
     })
     .on('change', (event) => {
-      starScale = event.value
-      starOverlay.setScale(starScale)
+      minStarScale = Math.min(event.value, maxStarScale)
+      starOverlay.setScaleRange(minStarScale, maxStarScale)
+      syncPaneState()
+    })
+  starsFolder
+    .addBinding(paneState, 'maxStarScale', {
+      label: 'Max size',
+      min: MIN_STAR_SCALE_LIMIT,
+      max: MAX_STAR_SCALE_LIMIT,
+      step: 0.01,
+    })
+    .on('change', (event) => {
+      maxStarScale = Math.max(event.value, minStarScale)
+      starOverlay.setScaleRange(minStarScale, maxStarScale)
       syncPaneState()
     })
 
@@ -450,13 +470,13 @@ window.addEventListener('keydown', (event) => {
 
   if (event.key === 'j' || event.key === 'J') {
     event.preventDefault()
-    adjustStarScale(1 / STAR_SCALE_STEP)
+    adjustStarScaleRange(1 / STAR_SCALE_STEP)
     return
   }
 
   if (event.key === 'k' || event.key === 'K') {
     event.preventDefault()
-    adjustStarScale(STAR_SCALE_STEP)
+    adjustStarScaleRange(STAR_SCALE_STEP)
     return
   }
 

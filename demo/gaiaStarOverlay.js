@@ -23,7 +23,8 @@ const FIXED_POINT_SCALE = 1 << 16
 const STAR_SPHERE_RADIUS = 90
 const REFERENCE_FOV_DEG = 60
 const STAR_EXPOSURE = 1.6
-const STAR_SCALE = 1
+const STAR_MIN_SCALE = 0.55
+const STAR_MAX_SCALE = 2.4
 
 const bpRpToRgb = (bpRp) => {
   if (!Number.isFinite(bpRp)) {
@@ -91,7 +92,10 @@ export class GaiaStarOverlay {
     this.fovBoostU = uniform(1)
     this.starDistanceU = uniform(STAR_SPHERE_RADIUS)
     this.starExposureU = uniform(STAR_EXPOSURE)
-    this.starScaleU = uniform(STAR_SCALE)
+    this.starMinScaleU = uniform(STAR_MIN_SCALE)
+    this.starMaxScaleU = uniform(STAR_MAX_SCALE)
+    this.minMagnitudeU = uniform(0)
+    this.maxMagnitudeU = uniform(1)
 
     this.clearAccumCompute = null
     this.splatCompute = null
@@ -107,8 +111,11 @@ export class GaiaStarOverlay {
     this.starExposureU.value = STAR_EXPOSURE * Math.max(0, exposure)
   }
 
-  setScale(scale) {
-    this.starScaleU.value = Math.max(0.1, scale)
+  setScaleRange(minScale, maxScale) {
+    const clampedMin = Math.max(0.1, minScale)
+    const clampedMax = Math.max(clampedMin, maxScale)
+    this.starMinScaleU.value = clampedMin
+    this.starMaxScaleU.value = clampedMax
   }
 
   setPlanet(center, radius) {
@@ -141,6 +148,8 @@ export class GaiaStarOverlay {
     const directions = new Float32Array(starCount * 4)
     const colors = new Float32Array(starCount * 4)
     const magnitudes = new Float32Array(starCount)
+    let minMagnitude = Number.POSITIVE_INFINITY
+    let maxMagnitude = Number.NEGATIVE_INFINITY
 
     let starIndex = 0
     for (const starData of chunkArrays) {
@@ -171,6 +180,8 @@ export class GaiaStarOverlay {
         colors[directionBase + 3] = 1
 
         magnitudes[starIndex] = magnitude
+        minMagnitude = Math.min(minMagnitude, magnitude)
+        maxMagnitude = Math.max(maxMagnitude, magnitude)
         starIndex += 1
       }
     }
@@ -183,6 +194,11 @@ export class GaiaStarOverlay {
     this.directionBuf = storage(this.directionSBA, 'vec4', this.starCount)
     this.colorBuf = storage(this.colorSBA, 'vec4', this.starCount)
     this.magnitudeBuf = storage(this.magnitudeSBA, 'float', this.starCount)
+    this.minMagnitudeU.value = Number.isFinite(minMagnitude) ? minMagnitude : 0
+    this.maxMagnitudeU.value =
+      Number.isFinite(maxMagnitude) && maxMagnitude > this.minMagnitudeU.value
+        ? maxMagnitude
+        : this.minMagnitudeU.value + 1
 
     this.directionSBA.needsUpdate = true
     this.colorSBA.needsUpdate = true
@@ -284,10 +300,13 @@ export class GaiaStarOverlay {
           .mul(this.starExposureU)
           .mul(this.fovBoostU)
 
-        const radiusPx = float(0.55)
-          .add(smoothstep(0.0008, 0.15, flux).mul(1.85))
-          .mul(this.starScaleU)
-          .clamp(0.25, 6)
+        const normalizedMagnitude = magnitude
+          .sub(this.minMagnitudeU)
+          .div(this.maxMagnitudeU.sub(this.minMagnitudeU).max(0.0001))
+          .clamp(0, 1)
+        const radiusPx = this.starMaxScaleU
+          .sub(this.starMaxScaleU.sub(this.starMinScaleU).mul(normalizedMagnitude))
+          .clamp(0.1, 8)
 
         const fp = this.fpScaleU.toFloat()
 
