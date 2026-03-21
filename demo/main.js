@@ -27,6 +27,9 @@ const MAX_SUN_ALTITUDE_DEG = 90
 const MIN_EXPOSURE = 0.125
 const MAX_EXPOSURE = 16
 const EXPOSURE_STEP_STOPS = 1 / 3
+const MIN_STAR_SCALE = 0.5
+const MAX_STAR_SCALE = 4
+const STAR_SCALE_STEP = 1.15
 
 const canvas = document.querySelector('#app')
 if (!(canvas instanceof HTMLCanvasElement)) {
@@ -56,6 +59,7 @@ let lastPointerY = 0
 let atmospherePreset = 'earth'
 let altitudeMeters = MIN_ALTITUDE_METERS
 let exposure = 1
+let starScale = 1
 const sunState = {
   altitudeDeg: 24,
   azimuthDeg: -35,
@@ -96,6 +100,7 @@ const applyVisualExposure = () => {
     sunDiscIntensity: baseSettings.sunDiscIntensity * exposure,
   })
   starOverlay.setExposure(exposure)
+  starOverlay.setScale(starScale)
 }
 
 const applyCameraOrientation = () => {
@@ -164,6 +169,15 @@ const adjustExposure = (deltaStops) => {
     MAX_EXPOSURE,
   )
   applyVisualExposure()
+}
+
+const adjustStarScale = (scaleFactor) => {
+  starScale = THREE.MathUtils.clamp(
+    starScale * scaleFactor,
+    MIN_STAR_SCALE,
+    MAX_STAR_SCALE,
+  )
+  starOverlay.setScale(starScale)
 }
 
 const stopDragging = () => {
@@ -303,6 +317,18 @@ window.addEventListener('keydown', (event) => {
   if (event.key === '-') {
     event.preventDefault()
     adjustSunAltitude(-SUN_ALTITUDE_STEP_DEG)
+    return
+  }
+
+  if (event.key === 'j' || event.key === 'J') {
+    event.preventDefault()
+    adjustStarScale(1 / STAR_SCALE_STEP)
+    return
+  }
+
+  if (event.key === 'k' || event.key === 'K') {
+    event.preventDefault()
+    adjustStarScale(STAR_SCALE_STEP)
     return
   }
 

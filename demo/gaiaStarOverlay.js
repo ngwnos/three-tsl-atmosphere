@@ -22,6 +22,7 @@ const FIXED_POINT_SCALE = 1 << 16
 const STAR_SPHERE_RADIUS = 90
 const REFERENCE_FOV_DEG = 60
 const STAR_EXPOSURE = 1.6
+const STAR_SCALE = 1
 
 const clamp01 = (value) => Math.min(1, Math.max(0, value))
 
@@ -93,6 +94,7 @@ export class GaiaStarOverlay {
     this.fovBoostU = uniform(1)
     this.starDistanceU = uniform(STAR_SPHERE_RADIUS)
     this.starExposureU = uniform(STAR_EXPOSURE)
+    this.starScaleU = uniform(STAR_SCALE)
 
     this.clearAccumCompute = null
     this.splatCompute = null
@@ -106,6 +108,10 @@ export class GaiaStarOverlay {
 
   setExposure(exposure) {
     this.starExposureU.value = STAR_EXPOSURE * Math.max(0, exposure)
+  }
+
+  setScale(scale) {
+    this.starScaleU.value = Math.max(0.1, scale)
   }
 
   async load(url) {
@@ -252,26 +258,29 @@ export class GaiaStarOverlay {
 
         const radiusPx = float(0.55)
           .add(smoothstep(0.0008, 0.15, flux).mul(1.85))
-          .clamp(0.55, 2.4)
+          .mul(this.starScaleU)
+          .clamp(0.45, 3.4)
 
         const fp = this.fpScaleU.toFloat()
 
         const splatKernel = (dx, dy) => {
-          const pixelX = xPx.add(float(dx))
-          const pixelY = yPx.add(float(dy))
-          const inBounds = pixelX.greaterThanEqual(0)
-            .and(pixelX.lessThan(this.accW.toFloat()))
-            .and(pixelY.greaterThanEqual(0))
-            .and(pixelY.lessThan(this.accH.toFloat()))
+          const ix = xPx.floor().add(float(dx))
+          const iy = yPx.floor().add(float(dy))
+          const sampleCenterX = ix.add(0.5)
+          const sampleCenterY = iy.add(0.5)
+          const deltaX = sampleCenterX.sub(xPx)
+          const deltaY = sampleCenterY.sub(yPx)
+          const inBounds = ix.greaterThanEqual(0)
+            .and(ix.lessThan(this.accW.toFloat()))
+            .and(iy.greaterThanEqual(0))
+            .and(iy.lessThan(this.accH.toFloat()))
 
           If(inBounds, () => {
-            const distancePx = float(dx * dx + dy * dy).sqrt()
+            const distancePx = deltaX.mul(deltaX).add(deltaY.mul(deltaY)).sqrt()
 
             If(distancePx.lessThanEqual(radiusPx), () => {
               const weight = float(1).sub(smoothstep(radiusPx.mul(0.7), radiusPx, distancePx))
-              const ix = pixelX.floor().toUint()
-              const iy = pixelY.floor().toUint()
-              const pixelIndex = iy.mul(this.accW).add(ix)
+              const pixelIndex = iy.toUint().mul(this.accW).add(ix.toUint())
               const contribution = contributionScale.mul(weight)
 
               atomicAdd(
@@ -290,31 +299,55 @@ export class GaiaStarOverlay {
           })
         }
 
+        splatKernel(-3, -3)
+        splatKernel(-2, -3)
+        splatKernel(-1, -3)
+        splatKernel(0, -3)
+        splatKernel(1, -3)
+        splatKernel(2, -3)
+        splatKernel(3, -3)
+        splatKernel(-3, -2)
         splatKernel(-2, -2)
         splatKernel(-1, -2)
         splatKernel(0, -2)
         splatKernel(1, -2)
         splatKernel(2, -2)
+        splatKernel(3, -2)
+        splatKernel(-3, -1)
         splatKernel(-2, -1)
         splatKernel(-1, -1)
         splatKernel(0, -1)
         splatKernel(1, -1)
         splatKernel(2, -1)
+        splatKernel(3, -1)
+        splatKernel(-3, 0)
         splatKernel(-2, 0)
         splatKernel(-1, 0)
         splatKernel(0, 0)
         splatKernel(1, 0)
         splatKernel(2, 0)
+        splatKernel(3, 0)
+        splatKernel(-3, 1)
         splatKernel(-2, 1)
         splatKernel(-1, 1)
         splatKernel(0, 1)
         splatKernel(1, 1)
         splatKernel(2, 1)
+        splatKernel(3, 1)
+        splatKernel(-3, 2)
         splatKernel(-2, 2)
         splatKernel(-1, 2)
         splatKernel(0, 2)
         splatKernel(1, 2)
         splatKernel(2, 2)
+        splatKernel(3, 2)
+        splatKernel(-3, 3)
+        splatKernel(-2, 3)
+        splatKernel(-1, 3)
+        splatKernel(0, 3)
+        splatKernel(1, 3)
+        splatKernel(2, 3)
+        splatKernel(3, 3)
       })
     })().compute(this.starCount)
   }
