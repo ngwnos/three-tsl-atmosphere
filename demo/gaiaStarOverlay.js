@@ -56,8 +56,22 @@ const bpRpToRgb = (bpRp) => {
   return [1, 0.7 - 0.4 * t, 0.2 - 0.1 * t]
 }
 
-const computeNightVisibility = (sunAltitudeDeg) =>
-  THREE.MathUtils.smootherstep(-sunAltitudeDeg, 0, 18)
+const computeStarVisibility = (sunAltitudeDeg) => {
+  const altitudeRad = THREE.MathUtils.degToRad(sunAltitudeDeg)
+  const daylightTerm = Math.max(0, Math.sin(altitudeRad))
+  const daylightIlluminanceLux = 120000 * Math.pow(daylightTerm, 0.5)
+
+  // Continuous twilight sky-glow approximation from civil through astronomical twilight.
+  // This avoids a hard horizon gate while still crushing stars in bright sky conditions.
+  const twilightMix = clamp01((sunAltitudeDeg + 18) / 18)
+  const twilightIlluminanceLux = 10 ** THREE.MathUtils.lerp(-4, 2, twilightMix)
+
+  // Characteristic illuminance where stars begin to become meaningfully visible.
+  const adaptationLux = 0.002
+  const skyIlluminanceLux = daylightIlluminanceLux + twilightIlluminanceLux
+
+  return adaptationLux / (adaptationLux + skyIlluminanceLux)
+}
 
 const computeFovBoost = (fovDeg) =>
   THREE.MathUtils.clamp(REFERENCE_FOV_DEG / Math.max(10, fovDeg), 0.75, 3.5)
@@ -388,7 +402,7 @@ export class GaiaStarOverlay {
     this.tmpViewProj.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse)
     this.viewProjU.value.copy(this.tmpViewProj)
     this.cameraPositionU.value.copy(camera.position)
-    this.nightVisibilityU.value = clamp01(computeNightVisibility(sunAltitudeDeg))
+    this.nightVisibilityU.value = clamp01(computeStarVisibility(sunAltitudeDeg))
     this.fovBoostU.value = computeFovBoost(camera.fov)
   }
 
