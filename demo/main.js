@@ -30,6 +30,9 @@ const EXPOSURE_STEP_STOPS = 1 / 3
 const MIN_STAR_SCALE = 0.25
 const MAX_STAR_SCALE = 8
 const STAR_SCALE_STEP = Math.SQRT2
+const GAIA_CHUNK_URLS = Array.from({ length: 5 }, (_, index) =>
+  `/data/gaia/chunk_${String(index).padStart(4, '0')}.bin`,
+)
 
 const canvas = document.querySelector('#app')
 if (!(canvas instanceof HTMLCanvasElement)) {
@@ -398,7 +401,7 @@ const bootstrap = async () => {
   handleResize()
   await Promise.all([
     atmosphereRig.prime(renderer),
-    starOverlay.load('/data/gaia/chunk_0000.bin'),
+    starOverlay.load(GAIA_CHUNK_URLS),
   ])
   applyVisualExposure()
 

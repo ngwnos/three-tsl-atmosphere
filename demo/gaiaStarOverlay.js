@@ -116,47 +116,63 @@ export class GaiaStarOverlay {
     this.planetRadiusU.value = Math.max(0, radius)
   }
 
-  async load(url) {
-    const response = await fetch(url)
-    if (!response.ok) {
-      throw new Error(`Failed to load Gaia chunk: ${response.status} ${response.statusText}`)
-    }
+  async load(urls) {
+    const urlList = Array.isArray(urls) ? urls : [urls]
+    const chunkArrays = await Promise.all(
+      urlList.map(async (url) => {
+        const response = await fetch(url)
+        if (!response.ok) {
+          throw new Error(`Failed to load Gaia chunk: ${response.status} ${response.statusText}`)
+        }
 
-    const starData = new Float32Array(await response.arrayBuffer())
-    if (starData.length % FLOATS_PER_STAR !== 0) {
-      throw new Error('Unexpected Gaia chunk size.')
-    }
+        const starData = new Float32Array(await response.arrayBuffer())
+        if (starData.length % FLOATS_PER_STAR !== 0) {
+          throw new Error(`Unexpected Gaia chunk size for ${url}.`)
+        }
 
-    const starCount = starData.length / FLOATS_PER_STAR
+        return starData
+      }),
+    )
+
+    const starCount = chunkArrays.reduce(
+      (total, starData) => total + starData.length / FLOATS_PER_STAR,
+      0,
+    )
     const directions = new Float32Array(starCount * 4)
     const colors = new Float32Array(starCount * 4)
     const magnitudes = new Float32Array(starCount)
 
-    for (let index = 0; index < starCount; index += 1) {
-      const offset = index * FLOATS_PER_STAR
-      const ra = THREE.MathUtils.degToRad(starData[offset + 0])
-      const dec = THREE.MathUtils.degToRad(starData[offset + 1])
-      const magnitude = starData[offset + 6]
-      const bpRp = starData[offset + 7]
+    let starIndex = 0
+    for (const starData of chunkArrays) {
+      const chunkStarCount = starData.length / FLOATS_PER_STAR
 
-      const horizontal = Math.cos(dec)
-      const x = Math.sin(ra) * horizontal
-      const y = Math.sin(dec)
-      const z = Math.cos(ra) * horizontal
-      const [r, g, b] = bpRpToRgb(bpRp)
-      const directionBase = index * 4
+      for (let chunkIndex = 0; chunkIndex < chunkStarCount; chunkIndex += 1) {
+        const offset = chunkIndex * FLOATS_PER_STAR
+        const ra = THREE.MathUtils.degToRad(starData[offset + 0])
+        const dec = THREE.MathUtils.degToRad(starData[offset + 1])
+        const magnitude = starData[offset + 6]
+        const bpRp = starData[offset + 7]
 
-      directions[directionBase + 0] = x
-      directions[directionBase + 1] = y
-      directions[directionBase + 2] = z
-      directions[directionBase + 3] = 1
+        const horizontal = Math.cos(dec)
+        const x = Math.sin(ra) * horizontal
+        const y = Math.sin(dec)
+        const z = Math.cos(ra) * horizontal
+        const [r, g, b] = bpRpToRgb(bpRp)
+        const directionBase = starIndex * 4
 
-      colors[directionBase + 0] = r
-      colors[directionBase + 1] = g
-      colors[directionBase + 2] = b
-      colors[directionBase + 3] = 1
+        directions[directionBase + 0] = x
+        directions[directionBase + 1] = y
+        directions[directionBase + 2] = z
+        directions[directionBase + 3] = 1
 
-      magnitudes[index] = magnitude
+        colors[directionBase + 0] = r
+        colors[directionBase + 1] = g
+        colors[directionBase + 2] = b
+        colors[directionBase + 3] = 1
+
+        magnitudes[starIndex] = magnitude
+        starIndex += 1
+      }
     }
 
     this.starCount = starCount
