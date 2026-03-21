@@ -1,10 +1,20 @@
 import * as THREE from 'three'
 import { WebGPURenderer } from 'three/webgpu'
-import {
-  createAtmosphereRig,
-  DEFAULT_ATMOSPHERE_SETTINGS,
-  DEFAULT_ATMOSPHERE_PHYSICAL_SETTINGS,
-} from 'three-tsl-atmosphere'
+import { createAtmosphereRig, DEFAULT_ATMOSPHERE_SETTINGS } from 'three-tsl-atmosphere'
+
+const EARTH_ATMOSPHERE_SETTINGS = DEFAULT_ATMOSPHERE_SETTINGS
+const ALT_ATMOSPHERE_SETTINGS = {
+  ...DEFAULT_ATMOSPHERE_SETTINGS,
+  starEffectiveTemperatureK: 3200,
+  starRadiusM: 590000000,
+  planetStarDistanceM: 97500000000,
+  atmosphereHeightM: 85000,
+  rayleighScatteringMultiplier: 1.2,
+  mieScatteringMultiplier: 0.7,
+  mieExtinctionMultiplier: 0.82,
+  skyIntensity: 1.3,
+  sunDiscIntensity: 1.1,
+}
 
 const canvas = document.querySelector('#app')
 if (!(canvas instanceof HTMLCanvasElement)) {
@@ -30,7 +40,7 @@ let yaw = 0
 let pitch = 0
 let lastPointerX = 0
 let lastPointerY = 0
-let atmosphereMode = 'artistic'
+let atmospherePreset = 'earth'
 
 camera.position.copy(cameraAnchor)
 
@@ -38,6 +48,7 @@ const renderer = new WebGPURenderer({ canvas, antialias: true, alpha: false })
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
 
 const atmosphereRig = createAtmosphereRig(scene, {
+  atmosphereSettings: EARTH_ATMOSPHERE_SETTINGS,
   skyLayer: 0,
   sun: {
     altitudeDeg: 24,
@@ -76,12 +87,12 @@ const renderDisplayFrame = () => {
   renderer.render(scene, camera)
 }
 
-const setAtmosphereMode = (nextMode) => {
-  atmosphereMode = nextMode
+const setAtmospherePreset = (nextPreset) => {
+  atmospherePreset = nextPreset
   atmosphereRig.setAtmosphereSettings(
-    nextMode === 'physical'
-      ? DEFAULT_ATMOSPHERE_PHYSICAL_SETTINGS
-      : DEFAULT_ATMOSPHERE_SETTINGS,
+    nextPreset === 'alternate'
+      ? ALT_ATMOSPHERE_SETTINGS
+      : EARTH_ATMOSPHERE_SETTINGS,
   )
   void atmosphereRig
     .prime(renderer)
@@ -89,12 +100,12 @@ const setAtmosphereMode = (nextMode) => {
       renderDisplayFrame()
     })
     .catch((error) => {
-      console.error('Failed to re-prime atmosphere mode.', error)
+      console.error('Failed to re-prime atmosphere preset.', error)
     })
 }
 
-const toggleAtmosphereMode = () => {
-  setAtmosphereMode(atmosphereMode === 'physical' ? 'artistic' : 'physical')
+const toggleAtmospherePreset = () => {
+  setAtmospherePreset(atmospherePreset === 'alternate' ? 'earth' : 'alternate')
 }
 
 const stopDragging = () => {
@@ -201,7 +212,7 @@ window.addEventListener('keydown', (event) => {
   }
 
   event.preventDefault()
-  toggleAtmosphereMode()
+  toggleAtmospherePreset()
 })
 
 const createIdeaOrcaCapture = () => ({

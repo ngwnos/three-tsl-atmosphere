@@ -2972,29 +2972,6 @@ var DEFAULT_ATMOSPHERE_SETTINGS = {
   sunDiscColorB: 0.8901960784313725,
   sunDiscInnerScale: 0.85,
   sunDiscOuterScale: 1.8,
-  planetRadiusKm: 6360,
-  atmosphereHeightKm: 60,
-  rayleighScaleHeightM: 8e3,
-  mieScaleHeightM: 1200,
-  miePhaseG: 0.8,
-  rayleighScatteringMultiplier: 1,
-  mieScatteringMultiplier: 1,
-  mieExtinctionMultiplier: 1,
-  absorptionExtinctionMultiplier: 1,
-  groundAlbedo: 0.3
-};
-var DEFAULT_ATMOSPHERE_PHYSICAL_SETTINGS = {
-  mode: "physical",
-  skyIntensity: 1.2,
-  skyTintR: 1,
-  skyTintG: 1,
-  skyTintB: 1,
-  sunDiscIntensity: 1.4,
-  sunDiscColorR: 1,
-  sunDiscColorG: 0.9686274509803922,
-  sunDiscColorB: 0.8901960784313725,
-  sunDiscInnerScale: 0.85,
-  sunDiscOuterScale: 1.8,
   planetRadiusM: 636e4,
   atmosphereHeightM: 6e4,
   rayleighScaleHeightM: 8e3,
@@ -3012,7 +2989,6 @@ var DEFAULT_ATMOSPHERE_PHYSICAL_SETTINGS = {
 var DEFAULT_WORLD_UNITS_PER_METER = 1;
 var DEFAULT_SKY_DOME_RADIUS_METERS = 50;
 var DEFAULT_REPRIME_DEBOUNCE_MS = 160;
-var KM_TO_M = 1e3;
 var PLANCK_CONSTANT = 662607015e-42;
 var SPEED_OF_LIGHT = 299792458;
 var BOLTZMANN_CONSTANT = 1380649e-29;
@@ -3020,8 +2996,10 @@ var SOLAR_SAMPLE_WAVELENGTHS_M = [68e-8, 55e-8, 44e-8];
 var clamp01 = (value) => Math.min(1, Math.max(0, value));
 var clampNonNegative = (value) => Math.max(0, value);
 var clampPositive = (value, fallback) => Number.isFinite(value) && value > 0 ? value : fallback;
-var isPhysicalAtmosphereSettings = (settings) => settings.mode === "physical";
-var normalizeAtmosphereSettings = (settings) => isPhysicalAtmosphereSettings(settings) ? { ...DEFAULT_ATMOSPHERE_PHYSICAL_SETTINGS, ...settings } : { ...DEFAULT_ATMOSPHERE_SETTINGS, ...settings };
+var normalizeAtmosphereSettings = (settings) => ({
+  ...DEFAULT_ATMOSPHERE_SETTINGS,
+  ...settings
+});
 var computeBlackbodySpectralRadiancePerMeter = (wavelengthM, temperatureK) => {
   const exponent = PLANCK_CONSTANT * SPEED_OF_LIGHT / (wavelengthM * BOLTZMANN_CONSTANT * temperatureK);
   if (!Number.isFinite(exponent) || exponent > 700) {
@@ -3031,18 +3009,18 @@ var computeBlackbodySpectralRadiancePerMeter = (wavelengthM, temperatureK) => {
   const denominator = wavelengthM ** 5 * (Math.exp(exponent) - 1);
   return denominator > 0 ? numerator / denominator : 0;
 };
-var derivePhysicalSolarIrradiance = (settings, target = new THREE.Vector3()) => {
+var deriveSolarIrradiance = (settings, target = new THREE.Vector3()) => {
   const starRadiusM = clampPositive(
     settings.starRadiusM,
-    DEFAULT_ATMOSPHERE_PHYSICAL_SETTINGS.starRadiusM
+    DEFAULT_ATMOSPHERE_SETTINGS.starRadiusM
   );
   const planetStarDistanceM = clampPositive(
     settings.planetStarDistanceM,
-    DEFAULT_ATMOSPHERE_PHYSICAL_SETTINGS.planetStarDistanceM
+    DEFAULT_ATMOSPHERE_SETTINGS.planetStarDistanceM
   );
   const starEffectiveTemperatureK = clampPositive(
     settings.starEffectiveTemperatureK,
-    DEFAULT_ATMOSPHERE_PHYSICAL_SETTINGS.starEffectiveTemperatureK
+    DEFAULT_ATMOSPHERE_SETTINGS.starEffectiveTemperatureK
   );
   const angularRadiusRatio = THREE.MathUtils.clamp(starRadiusM / planetStarDistanceM, 1e-8, 0.999999);
   const solidAngle = Math.PI * angularRadiusRatio ** 2;
@@ -3055,25 +3033,19 @@ var derivePhysicalSolarIrradiance = (settings, target = new THREE.Vector3()) => 
   });
   return target.set(values[0], values[1], values[2]);
 };
-var derivePhysicalSunAngularRadius = (settings) => {
+var deriveSunAngularRadius = (settings) => {
   const starRadiusM = clampPositive(
     settings.starRadiusM,
-    DEFAULT_ATMOSPHERE_PHYSICAL_SETTINGS.starRadiusM
+    DEFAULT_ATMOSPHERE_SETTINGS.starRadiusM
   );
   const planetStarDistanceM = clampPositive(
     settings.planetStarDistanceM,
-    DEFAULT_ATMOSPHERE_PHYSICAL_SETTINGS.planetStarDistanceM
+    DEFAULT_ATMOSPHERE_SETTINGS.planetStarDistanceM
   );
   return Math.asin(THREE.MathUtils.clamp(starRadiusM / planetStarDistanceM, 1e-8, 0.999999));
 };
-var getPlanetRadiusMeters = (settings) => isPhysicalAtmosphereSettings(settings) ? clampPositive(settings.planetRadiusM, DEFAULT_ATMOSPHERE_PHYSICAL_SETTINGS.planetRadiusM) : Math.max(1, settings.planetRadiusKm) * KM_TO_M;
-var getAtmosphereHeightMeters = (settings) => isPhysicalAtmosphereSettings(settings) ? clampPositive(
-  settings.atmosphereHeightM,
-  DEFAULT_ATMOSPHERE_PHYSICAL_SETTINGS.atmosphereHeightM
-) : Math.max(0.1, settings.atmosphereHeightKm) * KM_TO_M;
 var lutKey = (settings) => {
-  const values = isPhysicalAtmosphereSettings(settings) ? [
-    "physical",
+  const values = [
     settings.planetRadiusM,
     settings.atmosphereHeightM,
     settings.starRadiusM,
@@ -3087,20 +3059,8 @@ var lutKey = (settings) => {
     settings.mieExtinctionMultiplier,
     settings.absorptionExtinctionMultiplier,
     settings.groundAlbedo
-  ] : [
-    "artistic",
-    settings.planetRadiusKm,
-    settings.atmosphereHeightKm,
-    settings.rayleighScaleHeightM,
-    settings.mieScaleHeightM,
-    settings.miePhaseG,
-    settings.rayleighScatteringMultiplier,
-    settings.mieScatteringMultiplier,
-    settings.mieExtinctionMultiplier,
-    settings.absorptionExtinctionMultiplier,
-    settings.groundAlbedo
   ];
-  return values.map((value) => typeof value === "number" ? value.toFixed(6) : value).join("|");
+  return values.map((value) => value.toFixed(6)).join("|");
 };
 var sunDirectionFromAngles = (altitudeDeg, azimuthDeg, target = new THREE.Vector3()) => {
   const altitudeRadians = THREE.MathUtils.degToRad(altitudeDeg);
@@ -3118,8 +3078,6 @@ var createAtmosphereSystem = (scene, initialSettings = DEFAULT_ATMOSPHERE_SETTIN
   const reprimeDebounceMs = Number.isFinite(options.reprimeDebounceMs) && (options.reprimeDebounceMs ?? 0) >= 0 ? options.reprimeDebounceMs : DEFAULT_REPRIME_DEBOUNCE_MS;
   let settings = normalizeAtmosphereSettings(initialSettings);
   const parameters = new AtmosphereParameters();
-  const baseSolarIrradiance = parameters.solarIrradiance.clone();
-  const baseSunAngularRadius = parameters.sunAngularRadius;
   const baseRayleigh = parameters.rayleighScattering.clone();
   const baseMieScattering = parameters.mieScattering.clone();
   const baseMieExtinction = parameters.mieExtinction.clone();
@@ -3171,8 +3129,14 @@ var createAtmosphereSystem = (scene, initialSettings = DEFAULT_ATMOSPHERE_SETTIN
     sunDiscAngularRadius.value = Math.max(1e-5, parameters.sunAngularRadius * averageScale);
   };
   const applyLutSettings = () => {
-    const planetRadiusMeters = getPlanetRadiusMeters(settings);
-    const atmosphereHeightMeters = getAtmosphereHeightMeters(settings);
+    const planetRadiusMeters = clampPositive(
+      settings.planetRadiusM,
+      DEFAULT_ATMOSPHERE_SETTINGS.planetRadiusM
+    );
+    const atmosphereHeightMeters = clampPositive(
+      settings.atmosphereHeightM,
+      DEFAULT_ATMOSPHERE_SETTINGS.atmosphereHeightM
+    );
     parameters.bottomRadius = planetRadiusMeters;
     parameters.topRadius = planetRadiusMeters + atmosphereHeightMeters;
     parameters.rayleighDensity.layers[1].expScale = -1 / Math.max(1, settings.rayleighScaleHeightM);
@@ -3183,13 +3147,8 @@ var createAtmosphereSystem = (scene, initialSettings = DEFAULT_ATMOSPHERE_SETTIN
     parameters.mieExtinction.copy(baseMieExtinction).multiplyScalar(clampNonNegative(settings.mieExtinctionMultiplier));
     parameters.absorptionExtinction.copy(baseAbsorptionExtinction).multiplyScalar(clampNonNegative(settings.absorptionExtinctionMultiplier));
     parameters.groundAlbedo.setScalar(clamp01(settings.groundAlbedo));
-    if (isPhysicalAtmosphereSettings(settings)) {
-      parameters.solarIrradiance.copy(derivePhysicalSolarIrradiance(settings, solarIrradianceScratch));
-      parameters.sunAngularRadius = derivePhysicalSunAngularRadius(settings);
-    } else {
-      parameters.solarIrradiance.copy(baseSolarIrradiance);
-      parameters.sunAngularRadius = baseSunAngularRadius;
-    }
+    parameters.solarIrradiance.copy(deriveSolarIrradiance(settings, solarIrradianceScratch));
+    parameters.sunAngularRadius = deriveSunAngularRadius(settings);
     lutNode.configure(parameters.clone());
     const sunDirectionValue = atmosphereContext.sunDirectionWorld.value.clone();
     atmosphereContext = new AtmosphereContextNode(parameters.clone(), lutNode);
@@ -3425,7 +3384,10 @@ var getRendererLightNodeLibrary = (renderer) => {
   }
   return lightLibrary;
 };
-var normalizeRigAtmosphereSettings = (settings) => settings.mode === "physical" ? { ...DEFAULT_ATMOSPHERE_PHYSICAL_SETTINGS, ...settings } : { ...DEFAULT_ATMOSPHERE_SETTINGS, ...settings };
+var normalizeRigAtmosphereSettings = (settings) => ({
+  ...DEFAULT_ATMOSPHERE_SETTINGS,
+  ...settings
+});
 var ensureAtmosphereLightNodeRegistered = (renderer) => {
   const lightLibrary = getRendererLightNodeLibrary(renderer);
   if (!lightLibrary) {
@@ -3653,11 +3615,10 @@ export {
   AtmosphereLight,
   AtmosphereLightNode,
   AtmosphereParameters,
-  DEFAULT_ATMOSPHERE_PHYSICAL_SETTINGS,
   DEFAULT_ATMOSPHERE_SETTINGS,
   createAtmosphereRig,
   createAtmosphereSystem,
-  derivePhysicalSolarIrradiance,
-  derivePhysicalSunAngularRadius,
+  deriveSolarIrradiance,
+  deriveSunAngularRadius,
   sunDirectionFromAngles
 };

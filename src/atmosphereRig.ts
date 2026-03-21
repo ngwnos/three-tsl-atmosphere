@@ -6,7 +6,6 @@ import { AtmosphereLightNode } from './AtmosphereLightNode'
 import {
   createAtmosphereSystem,
   DEFAULT_ATMOSPHERE_SETTINGS,
-  DEFAULT_ATMOSPHERE_PHYSICAL_SETTINGS,
   sunDirectionFromAngles,
   type AtmosphereSettings,
   type AtmosphereSystem,
@@ -110,10 +109,10 @@ const getRendererLightNodeLibrary = (renderer: WebGPURenderer): LightNodeLibrary
   return lightLibrary as LightNodeLibrary
 }
 
-const normalizeRigAtmosphereSettings = (settings: AtmosphereSettings): AtmosphereSettings =>
-  settings.mode === 'physical'
-    ? { ...DEFAULT_ATMOSPHERE_PHYSICAL_SETTINGS, ...settings }
-    : { ...DEFAULT_ATMOSPHERE_SETTINGS, ...settings }
+const normalizeRigAtmosphereSettings = (settings: AtmosphereSettings): AtmosphereSettings => ({
+  ...DEFAULT_ATMOSPHERE_SETTINGS,
+  ...settings,
+})
 
 const ensureAtmosphereLightNodeRegistered = (renderer: WebGPURenderer): void => {
   const lightLibrary = getRendererLightNodeLibrary(renderer)
