@@ -78,43 +78,22 @@ const buildAltAzGridGeometry = (radius) => {
   return geometry
 }
 
-const buildRaDecGridGeometry = (radius, equatorialToLocalQuaternion) => {
+const buildRaDecGridGeometry = (radius) => {
   const positions = []
-  const transformedPoint = new THREE.Vector3()
-  const isVisible = (point) => point.y >= 0
-
-  for (
-    let declinationDeg = -75;
-    declinationDeg <= 75;
-    declinationDeg += RA_DEC_DECLINATION_STEP_DEG
-  ) {
+  for (let declinationDeg = -75; declinationDeg <= 75; declinationDeg += RA_DEC_DECLINATION_STEP_DEG) {
     const points = []
-    for (
-      let rightAscensionDeg = 0;
-      rightAscensionDeg <= 360;
-      rightAscensionDeg += CIRCLE_SEGMENT_STEP_DEG
-    ) {
-      transformedPoint
-        .copy(equatorialDirectionFromRaDec(rightAscensionDeg, declinationDeg, radius))
-        .applyQuaternion(equatorialToLocalQuaternion)
-      points.push(transformedPoint.clone())
+    for (let rightAscensionDeg = 0; rightAscensionDeg <= 360; rightAscensionDeg += CIRCLE_SEGMENT_STEP_DEG) {
+      points.push(equatorialDirectionFromRaDec(rightAscensionDeg, declinationDeg, radius))
     }
-    pushVisiblePolyline(positions, points, isVisible)
+    pushVisiblePolyline(positions, points, () => true)
   }
 
-  for (
-    let rightAscensionDeg = 0;
-    rightAscensionDeg < 360;
-    rightAscensionDeg += RA_DEC_RIGHT_ASCENSION_STEP_DEG
-  ) {
+  for (let rightAscensionDeg = 0; rightAscensionDeg < 360; rightAscensionDeg += RA_DEC_RIGHT_ASCENSION_STEP_DEG) {
     const points = []
     for (let declinationDeg = -90; declinationDeg <= 90; declinationDeg += ARC_SEGMENT_STEP_DEG) {
-      transformedPoint
-        .copy(equatorialDirectionFromRaDec(rightAscensionDeg, declinationDeg, radius))
-        .applyQuaternion(equatorialToLocalQuaternion)
-      points.push(transformedPoint.clone())
+      points.push(equatorialDirectionFromRaDec(rightAscensionDeg, declinationDeg, radius))
     }
-    pushVisiblePolyline(positions, points, isVisible)
+    pushVisiblePolyline(positions, points, () => true)
   }
 
   const geometry = new THREE.BufferGeometry()
@@ -127,7 +106,6 @@ export class SkyGridOverlay {
     radius = DEFAULT_RADIUS,
     altAzColor = DEFAULT_ALT_AZ_COLOR,
     raDecColor = DEFAULT_RA_DEC_COLOR,
-    equatorialToLocalQuaternion = new THREE.Quaternion(),
   } = {}) {
     this.root = new THREE.Group()
     this.root.renderOrder = -90
@@ -141,7 +119,7 @@ export class SkyGridOverlay {
     this.root.add(this.altAzLines)
 
     this.raDecLines = new THREE.LineSegments(
-      buildRaDecGridGeometry(radius, equatorialToLocalQuaternion),
+      buildRaDecGridGeometry(radius),
       createGridMaterial(raDecColor),
     )
     this.raDecLines.renderOrder = -89
@@ -158,6 +136,10 @@ export class SkyGridOverlay {
 
   setCameraPosition(position) {
     this.root.position.copy(position)
+  }
+
+  setEquatorialToLocal(quaternion) {
+    this.raDecLines.quaternion.copy(quaternion)
   }
 
   setAltAzEnabled(enabled) {

@@ -32,8 +32,9 @@ const EXPOSURE_STEP_STOPS = 1 / 3
 const MIN_STAR_SCALE_LIMIT = 0.1
 const MAX_STAR_SCALE_LIMIT = 8
 const STAR_SCALE_STEP = Math.SQRT2
-const OBSERVER_LATITUDE_DEG = 37.7749
-const LOCAL_SIDEREAL_ANGLE_DEG = 25
+const DEFAULT_OBSERVER_LATITUDE_DEG = 37.7749
+const DEFAULT_OBSERVER_LONGITUDE_DEG = -122.4194
+const GREENWICH_SIDEREAL_ANGLE_DEG = 25
 const GAIA_CHUNK_URLS = Array.from({ length: 5 }, (_, index) =>
   `/data/gaia/chunk_${String(index).padStart(4, '0')}.bin`,
 )
@@ -81,6 +82,8 @@ let altitudeMeters = MIN_ALTITUDE_METERS
 let exposure = 1
 let minStarScale = 0.55
 let maxStarScale = 2.4
+let observerLatitudeDeg = DEFAULT_OBSERVER_LATITUDE_DEG
+let observerLongitudeDeg = DEFAULT_OBSERVER_LONGITUDE_DEG
 let captureResources = null
 const sunState = {
   altitudeDeg: 24,
@@ -116,9 +119,7 @@ const atmosphereRig = createAtmosphereRig(scene, {
   ambientIntensity: 0,
 })
 const starOverlay = new GaiaStarOverlay()
-const gridOverlay = new SkyGridOverlay({
-  equatorialToLocalQuaternion,
-})
+const gridOverlay = new SkyGridOverlay()
 gridOverlay.addToScene(scene)
 const pane = new Pane({
   container: controlPanelContainer,
@@ -132,6 +133,8 @@ const paneState = {
   minStarScale,
   maxStarScale,
   altitudeKm: altitudeMeters / 1000,
+  observerLatitudeDeg,
+  observerLongitudeDeg,
   showAltAzGrid: gridState.showAltAzGrid,
   showRaDecGrid: gridState.showRaDecGrid,
 }
@@ -139,14 +142,15 @@ const paneState = {
 const updateEquatorialFrame = () => {
   equatorialTiltQuaternion.setFromAxisAngle(
     new THREE.Vector3(1, 0, 0),
-    THREE.MathUtils.degToRad(90 - OBSERVER_LATITUDE_DEG),
+    THREE.MathUtils.degToRad(90 - observerLatitudeDeg),
   )
   siderealQuaternion.setFromAxisAngle(
     new THREE.Vector3(0, 1, 0),
-    THREE.MathUtils.degToRad(LOCAL_SIDEREAL_ANGLE_DEG),
+    THREE.MathUtils.degToRad(GREENWICH_SIDEREAL_ANGLE_DEG + observerLongitudeDeg),
   )
   equatorialToLocalQuaternion.copy(equatorialTiltQuaternion).multiply(siderealQuaternion)
   equatorialToLocalMatrix.makeRotationFromQuaternion(equatorialToLocalQuaternion)
+  gridOverlay.setEquatorialToLocal(equatorialToLocalQuaternion)
 }
 
 const syncPaneState = () => {
@@ -157,6 +161,8 @@ const syncPaneState = () => {
   paneState.minStarScale = minStarScale
   paneState.maxStarScale = maxStarScale
   paneState.altitudeKm = altitudeMeters / 1000
+  paneState.observerLatitudeDeg = observerLatitudeDeg
+  paneState.observerLongitudeDeg = observerLongitudeDeg
   paneState.showAltAzGrid = gridState.showAltAzGrid
   paneState.showRaDecGrid = gridState.showRaDecGrid
   pane.refresh()
@@ -528,6 +534,32 @@ const buildControlPanel = () => {
     })
     .on('change', (event) => {
       exposure = event.value
+      applyVisualExposure()
+      syncPaneState()
+    })
+  sceneFolder
+    .addBinding(paneState, 'observerLatitudeDeg', {
+      label: 'Latitude',
+      min: -90,
+      max: 90,
+      step: 0.1,
+    })
+    .on('change', (event) => {
+      observerLatitudeDeg = event.value
+      updateEquatorialFrame()
+      applyVisualExposure()
+      syncPaneState()
+    })
+  sceneFolder
+    .addBinding(paneState, 'observerLongitudeDeg', {
+      label: 'Longitude',
+      min: -180,
+      max: 180,
+      step: 0.1,
+    })
+    .on('change', (event) => {
+      observerLongitudeDeg = event.value
+      updateEquatorialFrame()
       applyVisualExposure()
       syncPaneState()
     })
