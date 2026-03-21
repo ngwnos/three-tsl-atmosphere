@@ -16,6 +16,11 @@ const ALT_ATMOSPHERE_SETTINGS = {
   sunDiscIntensity: 1.1,
 }
 
+const MIN_ALTITUDE_METERS = 1.7
+const MAX_ALTITUDE_METERS = 2_000_000
+const MIN_ALTITUDE_SPEED_MPS = 4
+const ALTITUDE_SPEED_FACTOR = 0.2
+
 const canvas = document.querySelector('#app')
 if (!(canvas instanceof HTMLCanvasElement)) {
   throw new Error('Missing demo canvas')
@@ -23,13 +28,14 @@ if (!(canvas instanceof HTMLCanvasElement)) {
 
 const scene = new THREE.Scene()
 const camera = new THREE.PerspectiveCamera(60, 1, 0.1, 100)
-const cameraAnchor = new THREE.Vector3(0, 1.7, 0)
+const cameraAnchor = new THREE.Vector3(0, MIN_ALTITUDE_METERS, 0)
 const cameraEuler = new THREE.Euler(0, 0, 0, 'YXZ')
 const zoomPointer = new THREE.Vector3()
 const zoomBeforeDirection = new THREE.Vector3()
 const zoomAfterDirection = new THREE.Vector3()
 const zoomRotation = new THREE.Quaternion()
 const zoomedCameraQuaternion = new THREE.Quaternion()
+const clock = new THREE.Clock()
 const MAX_PITCH = Math.PI * 0.48
 const MIN_FOV = 20
 const MAX_FOV = 90
@@ -41,6 +47,11 @@ let pitch = 0
 let lastPointerX = 0
 let lastPointerY = 0
 let atmospherePreset = 'earth'
+let altitudeMeters = MIN_ALTITUDE_METERS
+const movementState = {
+  up: false,
+  down: false,
+}
 
 camera.position.copy(cameraAnchor)
 
@@ -65,6 +76,11 @@ const applyCameraOrientation = () => {
   camera.position.copy(cameraAnchor)
   cameraEuler.set(pitch, yaw, 0)
   camera.quaternion.setFromEuler(cameraEuler)
+}
+
+const syncCameraAltitude = () => {
+  cameraAnchor.set(0, altitudeMeters, 0)
+  applyCameraOrientation()
 }
 
 const setCameraOrientationFromQuaternion = (quaternion) => {
@@ -156,6 +172,22 @@ const updateZoom = (deltaY, clientX, clientY) => {
   setCameraOrientationFromQuaternion(zoomedCameraQuaternion)
 }
 
+const updateAltitude = (deltaSeconds) => {
+  const direction = (movementState.up ? 1 : 0) - (movementState.down ? 1 : 0)
+  if (direction === 0) return
+
+  const speedMetersPerSecond = Math.max(
+    MIN_ALTITUDE_SPEED_MPS,
+    altitudeMeters * ALTITUDE_SPEED_FACTOR,
+  )
+  altitudeMeters = THREE.MathUtils.clamp(
+    altitudeMeters + direction * speedMetersPerSecond * deltaSeconds,
+    MIN_ALTITUDE_METERS,
+    MAX_ALTITUDE_METERS,
+  )
+  syncCameraAltitude()
+}
+
 canvas.style.cursor = 'grab'
 canvas.style.touchAction = 'none'
 
@@ -197,22 +229,44 @@ canvas.addEventListener(
   { passive: false },
 )
 
-window.addEventListener('blur', stopDragging)
+window.addEventListener('blur', () => {
+  movementState.up = false
+  movementState.down = false
+  stopDragging()
+})
 window.addEventListener('resize', handleResize)
 window.addEventListener('keydown', (event) => {
-  if (
-    event.defaultPrevented ||
-    event.repeat ||
-    event.ctrlKey ||
-    event.altKey ||
-    event.metaKey ||
-    event.key !== '1'
-  ) {
+  if (event.defaultPrevented || event.repeat || event.ctrlKey || event.altKey || event.metaKey) {
     return
   }
 
-  event.preventDefault()
-  toggleAtmospherePreset()
+  if (event.key === '1') {
+    event.preventDefault()
+    toggleAtmospherePreset()
+    return
+  }
+
+  if (event.key === 'w' || event.key === 'W') {
+    event.preventDefault()
+    movementState.up = true
+    return
+  }
+
+  if (event.key === 's' || event.key === 'S') {
+    event.preventDefault()
+    movementState.down = true
+  }
+})
+
+window.addEventListener('keyup', (event) => {
+  if (event.key === 'w' || event.key === 'W') {
+    movementState.up = false
+    return
+  }
+
+  if (event.key === 's' || event.key === 'S') {
+    movementState.down = false
+  }
 })
 
 const createIdeaOrcaCapture = () => ({
@@ -247,7 +301,10 @@ const bootstrap = async () => {
 
   window.dispatchEvent(new Event('idea-orca-preview-ready'))
 
+  clock.start()
   renderer.setAnimationLoop(() => {
+    const deltaSeconds = Math.min(clock.getDelta(), 0.1)
+    updateAltitude(deltaSeconds)
     renderDisplayFrame()
   })
 }
