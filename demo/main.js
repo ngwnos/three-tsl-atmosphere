@@ -12,6 +12,9 @@ const camera = new THREE.PerspectiveCamera(60, 1, 0.1, 100)
 const cameraAnchor = new THREE.Vector3(0, 1.7, 0)
 const cameraEuler = new THREE.Euler(0, 0, 0, 'YXZ')
 const MAX_PITCH = Math.PI * 0.48
+const MIN_FOV = 20
+const MAX_FOV = 90
+const ZOOM_SENSITIVITY = 0.0015
 let dragging = false
 let activePointerId = null
 let yaw = 0
@@ -83,6 +86,12 @@ const updateLook = (deltaX, deltaY) => {
   applyCameraOrientation()
 }
 
+const updateZoom = (deltaY) => {
+  const zoomFactor = Math.exp(deltaY * ZOOM_SENSITIVITY)
+  camera.fov = THREE.MathUtils.clamp(camera.fov * zoomFactor, MIN_FOV, MAX_FOV)
+  camera.updateProjectionMatrix()
+}
+
 canvas.style.cursor = 'grab'
 canvas.style.touchAction = 'none'
 
@@ -114,6 +123,15 @@ canvas.addEventListener('pointercancel', (event) => {
   if (event.pointerId !== activePointerId) return
   stopDragging()
 })
+
+canvas.addEventListener(
+  'wheel',
+  (event) => {
+    event.preventDefault()
+    updateZoom(event.deltaY)
+  },
+  { passive: false },
+)
 
 window.addEventListener('blur', stopDragging)
 window.addEventListener('resize', handleResize)
