@@ -115,9 +115,6 @@ const trackedLookDirection = new THREE.Vector3()
 const trackedMoonPositionEquatorial = new THREE.Vector3()
 const trackedMoonPositionLocal = new THREE.Vector3()
 const trackedMoonPositionWorld = new THREE.Vector3()
-const trackedLookMatrix = new THREE.Matrix4()
-const trackedLookQuaternion = new THREE.Quaternion()
-const trackedUp = new THREE.Vector3(0, 1, 0)
 const MAX_PITCH = Math.PI * 0.48
 const MIN_FOV = 20
 const MAX_FOV = 150
@@ -240,6 +237,7 @@ const updateAstronomyFrame = () => {
   starOverlay.setEquatorialToLocal(equatorialToLocalMatrix)
   moonOverlay.setEquatorialToLocal(equatorialToLocalMatrix)
   applyResolvedSunAngles()
+  updateTrackedLook()
 }
 
 const syncPaneState = () => {
@@ -295,6 +293,13 @@ const setCameraOrientationFromQuaternion = (quaternion) => {
   applyCameraOrientation()
 }
 
+const setCameraOrientationFromDirection = (direction) => {
+  const normalizedDirection = trackedLookDirection.copy(direction).normalize()
+  yaw = Math.atan2(-normalizedDirection.x, -normalizedDirection.z)
+  pitch = THREE.MathUtils.clamp(Math.asin(normalizedDirection.y), -MAX_PITCH, MAX_PITCH)
+  applyCameraOrientation()
+}
+
 const getMoonLookDirection = (target = trackedLookDirection) => {
   const moon = EARTH_MOONS[0]
   if (!moon) {
@@ -331,9 +336,7 @@ const updateTrackedLook = () => {
     return
   }
 
-  trackedLookMatrix.lookAt(ZERO_VECTOR, targetDirection, trackedUp)
-  trackedLookQuaternion.setFromRotationMatrix(trackedLookMatrix)
-  setCameraOrientationFromQuaternion(trackedLookQuaternion)
+  setCameraOrientationFromDirection(targetDirection)
 }
 
 const handleResize = () => {
