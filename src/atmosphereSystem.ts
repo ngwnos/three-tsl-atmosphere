@@ -9,7 +9,9 @@ import {
   float,
   normalize,
   positionWorld,
+  select,
   smoothstep,
+  sqrt,
   uniform,
   vec3,
   vec4,
@@ -260,6 +262,7 @@ export const createAtmosphereSystem = (
         .sub(atmosphereContext.planetCenterWorld)
         .mul(atmosphereContext.worldToUnitScene)
         .toVar()
+      const cameraRadius = cameraUnit.length().toVar()
 
       const skyTransfer = getSkyLuminance(cameraUnit, worldViewDir, float(0), worldSunDir).toVar()
       const skyLuminance = skyTransfer.get('luminance').mul(skyIntensity).mul(skyTint).toVar()
@@ -277,7 +280,23 @@ export const createAtmosphereSystem = (
         .mul(skyTransfer.get('transmittance'))
         .toVar()
 
-      return vec4(skyLuminance.add(sunDiscLuminance), float(1))
+      // When the viewer is in space, the planet limb becomes a hard
+      // ground-intersection classification. Smooth the surface silhouette in
+      // screen space so distant atmosphere edges do not stair-step.
+      const cameraDotView = dot(cameraUnit, worldViewDir).toVar()
+      const closestApproach = sqrt(
+        cameraRadius.pow2().sub(cameraDotView.pow2()).max(float(0)),
+      ).toVar()
+      const limbDistance = closestApproach.sub(atmosphereContext.bottomRadius).toVar()
+      const limbWidth = fwidth(limbDistance).max(float(1e-5)).mul(2).toVar()
+      const rawPlanetMask = smoothstep(limbWidth.negate(), limbWidth, limbDistance).toVar()
+      const applyPlanetMask = cameraRadius
+        .greaterThan(atmosphereContext.topRadius)
+        .and(cameraDotView.lessThan(0))
+        .toVar()
+      const planetMask = select(applyPlanetMask, rawPlanetMask, float(1)).toVar()
+
+      return vec4(skyLuminance.add(sunDiscLuminance).mul(planetMask), float(1))
     })().context({ atmosphere: atmosphereContext })
 
   const createSkyMaterial = (): MeshBasicNodeMaterial => {

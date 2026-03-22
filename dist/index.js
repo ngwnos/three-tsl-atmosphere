@@ -10,7 +10,9 @@ import {
   float as float4,
   normalize,
   positionWorld,
+  select as select4,
   smoothstep as smoothstep3,
+  sqrt as sqrt4,
   uniform as uniform4,
   vec3 as vec36,
   vec4 as vec45
@@ -3101,6 +3103,7 @@ var createAtmosphereSystem = (scene, initialSettings = DEFAULT_ATMOSPHERE_SETTIN
     const worldViewDir = normalize(positionWorld.sub(cameraPosition)).toVar();
     const worldSunDir = normalize(atmosphereContext.sunDirectionWorld).toVar();
     const cameraUnit = cameraPosition.sub(atmosphereContext.planetCenterWorld).mul(atmosphereContext.worldToUnitScene).toVar();
+    const cameraRadius = cameraUnit.length().toVar();
     const skyTransfer = getSkyLuminance(cameraUnit, worldViewDir, float4(0), worldSunDir).toVar();
     const skyLuminance = skyTransfer.get("luminance").mul(skyIntensity).mul(skyTint).toVar();
     const sunChordThreshold = cos2(sunDiscAngularRadius).oneMinus().mul(2).toVar();
@@ -3109,7 +3112,16 @@ var createAtmosphereSystem = (scene, initialSettings = DEFAULT_ATMOSPHERE_SETTIN
     const sunFilterWidth = fwidth(sunChordLength).toVar();
     const sunDisc = smoothstep3(sunChordThreshold, sunChordThreshold.sub(sunFilterWidth), sunChordLength).mul(sunDiscIntensity).toVar();
     const sunDiscLuminance = getSolarLuminance().mul(vec36(sunDiscColor)).mul(sunDisc).mul(skyTransfer.get("transmittance")).toVar();
-    return vec45(skyLuminance.add(sunDiscLuminance), float4(1));
+    const cameraDotView = dot(cameraUnit, worldViewDir).toVar();
+    const closestApproach = sqrt4(
+      cameraRadius.pow2().sub(cameraDotView.pow2()).max(float4(0))
+    ).toVar();
+    const limbDistance = closestApproach.sub(atmosphereContext.bottomRadius).toVar();
+    const limbWidth = fwidth(limbDistance).max(float4(1e-5)).mul(2).toVar();
+    const rawPlanetMask = smoothstep3(limbWidth.negate(), limbWidth, limbDistance).toVar();
+    const applyPlanetMask = cameraRadius.greaterThan(atmosphereContext.topRadius).and(cameraDotView.lessThan(0)).toVar();
+    const planetMask = select4(applyPlanetMask, rawPlanetMask, float4(1)).toVar();
+    return vec45(skyLuminance.add(sunDiscLuminance).mul(planetMask), float4(1));
   })().context({ atmosphere: atmosphereContext });
   const createSkyMaterial = () => {
     const material2 = new MeshBasicNodeMaterial();
@@ -3331,7 +3343,7 @@ import {
   Fn as Fn5,
   normalWorld,
   positionWorld as positionWorld2,
-  select as select4,
+  select as select5,
   vec4 as vec46
 } from "three/tsl";
 import { AnalyticLightNode } from "three/webgpu";
@@ -3361,7 +3373,7 @@ var AtmosphereLightNode = class extends AnalyticLightNode {
     const skyIlluminance = Fn5((contextBuilder) => {
       contextBuilder.getContext().atmosphere = atmosphereContext;
       return getSkyIlluminance(positionUnit, normalUnit, sunDirectionWorld).mul(
-        select4(indirect, 1, 0)
+        select5(indirect, 1, 0)
       );
     })();
     const lightingContext = builder.getContext();
@@ -3377,7 +3389,7 @@ var AtmosphereLightNode = class extends AnalyticLightNode {
         cosSun
       );
     })();
-    const sunLuminance = solarIrradiance.mul(sunTransmittance).mul(sunRadianceToLuminance.mul(luminanceScale)).mul(select4(direct, 1, 0));
+    const sunLuminance = solarIrradiance.mul(sunTransmittance).mul(sunRadianceToLuminance.mul(luminanceScale)).mul(select5(direct, 1, 0));
     return {
       lightDirection: sunDirectionView,
       lightColor: sunLuminance.mul(this.colorNode)
