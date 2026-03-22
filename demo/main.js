@@ -158,16 +158,32 @@ const DEMO_MOON_COLORS = [
   0xe4d7c8,
   0xcdd6e4,
 ]
+const demoMoonRandom = (index, offset = 0) => {
+  const value = Math.sin((index + 1) * 12.9898 + offset * 78.233) * 43758.5453123
+  return value - Math.floor(value)
+}
+const demoMoonRange = (index, offset, min, max) =>
+  THREE.MathUtils.lerp(min, max, demoMoonRandom(index, offset))
 const DEMO_EXTRA_MOONS = Array.from({ length: MAX_MOON_COUNT - 1 }, (_, index) => {
   const orbitIndex = index + 1
+  const radiusM = 480_000 + orbitIndex * 92_000
   return {
     id: `demo-moon-${orbitIndex}`,
     name: `Demo ${orbitIndex}`,
-    radiusM: 480_000 + orbitIndex * 92_000,
+    radiusM,
     albedo: 0.08 + (orbitIndex % 5) * 0.03,
     reflectanceColor: DEMO_MOON_COLORS[index % DEMO_MOON_COLORS.length],
-    spinRateDegPerDay: 8 + orbitIndex * 3.5,
-    spinPhaseDegAtEpoch: (orbitIndex * 23) % 360,
+    spinRateDegPerDay: demoMoonRange(index, 1, 3, 220),
+    spinPhaseDegAtEpoch: demoMoonRange(index, 2, 0, 360),
+    surface: {
+      heightScaleM: radiusM * demoMoonRange(index, 3, 0.0025, 0.018),
+      procedural: {
+        seed: demoMoonRange(index, 4, 1, 97),
+        baseFrequency: demoMoonRange(index, 5, 3.5, 10.5),
+        detailFrequency: demoMoonRange(index, 6, 12, 42),
+        ridgeStrength: demoMoonRange(index, 7, 0.25, 0.95),
+      },
+    },
     orbit: {
       semiMajorAxisM: 235_000_000 + orbitIndex * 74_000_000,
       eccentricity: 0.01 + (orbitIndex % 4) * 0.015,
