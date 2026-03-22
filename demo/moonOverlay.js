@@ -273,7 +273,7 @@ export class MoonOverlay {
     }
 
     const centerXPx = (this.tmpProjectedCenter.x * 0.5 + 0.5) * width
-    const centerYPx = (this.tmpProjectedCenter.y * 0.5 + 0.5) * height
+    const centerYPx = (0.5 - this.tmpProjectedCenter.y * 0.5) * height
     if (
       centerXPx + radiusPx < 0 ||
       centerXPx - radiusPx > width ||
