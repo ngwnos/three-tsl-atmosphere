@@ -147,6 +147,9 @@ renderer.autoClear = false
 
 const atmosphereRig = createAtmosphereRig(scene, {
   atmosphereSettings: EARTH_ATMOSPHERE_SETTINGS,
+  atmosphereSystemOptions: {
+    presentationMode: 'screen-space',
+  },
   skyLayer: 0,
   sun: sunState,
   environment: {
@@ -404,6 +407,7 @@ const renderAtmosphereScene = (target) => {
   renderer.clear()
   gridOverlay.setCameraPosition(camera.position)
   atmosphereRig.update(renderer, camera)
+  atmosphereRig.renderBackground(renderer, camera)
   renderer.render(scene, camera)
   if (starsEnabled) {
     starOverlay.render(renderer, camera, sunState.altitudeDeg)

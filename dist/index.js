@@ -4,12 +4,15 @@ import { MeshBasicNodeMaterial } from "three/webgpu";
 import {
   cos as cos2,
   Fn as Fn4,
+  If as If5,
   cameraPosition,
   dot,
   fwidth,
   float as float4,
+  getViewPosition,
   normalize,
   positionWorld,
+  screenUV,
   select as select4,
   smoothstep as smoothstep3,
   sqrt as sqrt4,
@@ -2995,6 +2998,7 @@ var DEFAULT_ATMOSPHERE_SETTINGS = {
 var DEFAULT_WORLD_UNITS_PER_METER = 1;
 var DEFAULT_SKY_DOME_RADIUS_METERS = 50;
 var DEFAULT_REPRIME_DEBOUNCE_MS = 160;
+var DEFAULT_PRESENTATION_MODE = "sky-dome";
 var PLANCK_CONSTANT = 662607015e-42;
 var SPEED_OF_LIGHT = 299792458;
 var BOLTZMANN_CONSTANT = 1380649e-29;
@@ -3082,6 +3086,7 @@ var createAtmosphereSystem = (scene, initialSettings = DEFAULT_ATMOSPHERE_SETTIN
   const metersPerWorldUnit = 1 / worldUnitsPerMeter;
   const skyDomeRadiusMeters = Number.isFinite(options.skyDomeRadiusMeters) && (options.skyDomeRadiusMeters ?? 0) > 0 ? options.skyDomeRadiusMeters : DEFAULT_SKY_DOME_RADIUS_METERS;
   const reprimeDebounceMs = Number.isFinite(options.reprimeDebounceMs) && (options.reprimeDebounceMs ?? 0) >= 0 ? options.reprimeDebounceMs : DEFAULT_REPRIME_DEBOUNCE_MS;
+  const presentationMode = options.presentationMode ?? DEFAULT_PRESENTATION_MODE;
   let settings = normalizeAtmosphereSettings(initialSettings);
   const parameters = new AtmosphereParameters();
   const baseRayleigh = parameters.rayleighScattering.clone();
@@ -3098,11 +3103,15 @@ var createAtmosphereSystem = (scene, initialSettings = DEFAULT_ATMOSPHERE_SETTIN
     new THREE.Vector3(settings.sunDiscColorR, settings.sunDiscColorG, settings.sunDiscColorB)
   );
   const sunDiscAngularRadius = uniform4(parameters.sunAngularRadius);
+  const screenCameraProjectionMatrixInverse = uniform4(new THREE.Matrix4());
+  const screenCameraMatrixWorld = uniform4(new THREE.Matrix4());
+  const screenCameraWorldPosition = uniform4(new THREE.Vector3());
+  const screenCameraIsOrthographic = uniform4(false);
   const geometry = new THREE.SphereGeometry(skyDomeRadiusMeters * worldUnitsPerMeter, 64, 32);
-  const buildColorNode = () => Fn4(() => {
-    const worldViewDir = normalize(positionWorld.sub(cameraPosition)).toVar();
+  const buildSkyLuminanceNode = (cameraWorldPositionNode, worldViewDirNode, softenPlanetMask) => Fn4(() => {
+    const worldViewDir = normalize(worldViewDirNode).toVar();
     const worldSunDir = normalize(atmosphereContext.sunDirectionWorld).toVar();
-    const cameraUnit = cameraPosition.sub(atmosphereContext.planetCenterWorld).mul(atmosphereContext.worldToUnitScene).toVar();
+    const cameraUnit = cameraWorldPositionNode.sub(atmosphereContext.planetCenterWorld).mul(atmosphereContext.worldToUnitScene).toVar();
     const cameraRadius = cameraUnit.length().toVar();
     const skyTransfer = getSkyLuminance(cameraUnit, worldViewDir, float4(0), worldSunDir).toVar();
     const skyLuminance = skyTransfer.get("luminance").mul(skyIntensity).mul(skyTint).toVar();
@@ -3110,8 +3119,15 @@ var createAtmosphereSystem = (scene, initialSettings = DEFAULT_ATMOSPHERE_SETTIN
     const sunChordVector = worldViewDir.sub(worldSunDir).toVar();
     const sunChordLength = dot(sunChordVector, sunChordVector).toVar();
     const sunFilterWidth = fwidth(sunChordLength).toVar();
-    const sunDisc = smoothstep3(sunChordThreshold, sunChordThreshold.sub(sunFilterWidth), sunChordLength).mul(sunDiscIntensity).toVar();
+    const sunDisc = smoothstep3(
+      sunChordThreshold,
+      sunChordThreshold.sub(sunFilterWidth),
+      sunChordLength
+    ).mul(sunDiscIntensity).toVar();
     const sunDiscLuminance = getSolarLuminance().mul(vec36(sunDiscColor)).mul(sunDisc).mul(skyTransfer.get("transmittance")).toVar();
+    if (!softenPlanetMask) {
+      return skyLuminance.add(sunDiscLuminance);
+    }
     const cameraDotView = dot(cameraUnit, worldViewDir).toVar();
     const closestApproach = sqrt4(
       cameraRadius.pow2().sub(cameraDotView.pow2()).max(float4(0))
@@ -3121,8 +3137,38 @@ var createAtmosphereSystem = (scene, initialSettings = DEFAULT_ATMOSPHERE_SETTIN
     const rawPlanetMask = smoothstep3(limbWidth.negate(), limbWidth, limbDistance).toVar();
     const applyPlanetMask = cameraRadius.greaterThan(atmosphereContext.topRadius).and(cameraDotView.lessThan(0)).toVar();
     const planetMask = select4(applyPlanetMask, rawPlanetMask, float4(1)).toVar();
-    return vec45(skyLuminance.add(sunDiscLuminance).mul(planetMask), float4(1));
+    return skyLuminance.add(sunDiscLuminance).mul(planetMask);
   })().context({ atmosphere: atmosphereContext });
+  const buildColorNode = () => vec45(
+    buildSkyLuminanceNode(cameraPosition, positionWorld.sub(cameraPosition), true),
+    float4(1)
+  );
+  const buildScreenSpaceColorNode = () => Fn4(() => {
+    const viewPosition = getViewPosition(
+      screenUV,
+      float4(1),
+      screenCameraProjectionMatrixInverse
+    ).toVar();
+    const nearViewPosition = getViewPosition(
+      screenUV,
+      float4(0),
+      screenCameraProjectionMatrixInverse
+    ).toVar();
+    const originView = vec36(0, 0, 0).toVar();
+    const directionView = normalize(viewPosition).toVar();
+    If5(screenCameraIsOrthographic, () => {
+      originView.assign(nearViewPosition);
+      directionView.assign(vec36(0, 0, -1));
+    });
+    const worldOrigin = screenCameraWorldPosition.toVar();
+    If5(screenCameraIsOrthographic, () => {
+      worldOrigin.assign(screenCameraMatrixWorld.mul(vec45(originView, float4(1))).xyz);
+    });
+    const worldViewDirection = normalize(
+      screenCameraMatrixWorld.mul(vec45(directionView, float4(0))).xyz
+    ).toVar();
+    return vec45(buildSkyLuminanceNode(worldOrigin, worldViewDirection, false), float4(1));
+  })();
   const createSkyMaterial = () => {
     const material2 = new MeshBasicNodeMaterial();
     material2.side = THREE.BackSide;
@@ -3131,11 +3177,32 @@ var createAtmosphereSystem = (scene, initialSettings = DEFAULT_ATMOSPHERE_SETTIN
     material2.colorNode = buildColorNode();
     return material2;
   };
+  const createScreenSpaceMaterial = () => {
+    const material2 = new MeshBasicNodeMaterial();
+    material2.depthTest = false;
+    material2.depthWrite = false;
+    material2.outputNode = buildScreenSpaceColorNode();
+    return material2;
+  };
   let material = createSkyMaterial();
-  const skyMesh = new THREE.Mesh(geometry, material);
-  skyMesh.frustumCulled = false;
-  skyMesh.renderOrder = -100;
-  scene.add(skyMesh);
+  let skyMesh = null;
+  let backgroundScene = null;
+  let backgroundCamera = null;
+  let backgroundQuad = null;
+  if (presentationMode === "screen-space") {
+    backgroundScene = new THREE.Scene();
+    backgroundCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+    backgroundQuad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), createScreenSpaceMaterial());
+    backgroundQuad.frustumCulled = false;
+    backgroundScene.add(backgroundQuad);
+    material.dispose();
+    material = backgroundQuad.material;
+  } else {
+    skyMesh = new THREE.Mesh(geometry, material);
+    skyMesh.frustumCulled = false;
+    skyMesh.renderOrder = -100;
+    scene.add(skyMesh);
+  }
   const sunScratch = new THREE.Vector3(0, 1, 0);
   const solarIrradianceScratch = new THREE.Vector3();
   let rendererRef = null;
@@ -3187,8 +3254,13 @@ var createAtmosphereSystem = (scene, initialSettings = DEFAULT_ATMOSPHERE_SETTIN
     atmosphereContext.applyParameters(parametersSnapshot);
     atmosphereContext.planetCenterWorld.value.set(0, -planetRadiusMeters * worldUnitsPerMeter, 0);
     atmosphereContext.worldToUnitScene.value = parametersSnapshot.worldToUnit * metersPerWorldUnit;
-    const nextMaterial = createSkyMaterial();
-    skyMesh.material = nextMaterial;
+    const nextMaterial = presentationMode === "screen-space" ? createScreenSpaceMaterial() : createSkyMaterial();
+    if (skyMesh) {
+      skyMesh.material = nextMaterial;
+    }
+    if (backgroundQuad) {
+      backgroundQuad.material = nextMaterial;
+    }
     material.dispose();
     material = nextMaterial;
   };
@@ -3271,11 +3343,33 @@ var createAtmosphereSystem = (scene, initialSettings = DEFAULT_ATMOSPHERE_SETTIN
     atmosphereContext.sunDirectionWorld.value.copy(sunScratch);
   };
   const setCameraPosition = (positionWorld3) => {
-    skyMesh.position.copy(positionWorld3);
+    screenCameraWorldPosition.value.copy(positionWorld3);
+    if (skyMesh) {
+      skyMesh.position.copy(positionWorld3);
+    }
   };
   const setSkyLayer = (layer) => {
     const clampedLayer = THREE.MathUtils.clamp(Math.floor(layer), 0, 31);
-    skyMesh.layers.set(clampedLayer);
+    if (skyMesh) {
+      skyMesh.layers.set(clampedLayer);
+    }
+  };
+  const renderBackground = (renderer, camera) => {
+    if (!backgroundScene || !backgroundCamera) {
+      return;
+    }
+    camera.updateMatrixWorld();
+    if ("projectionMatrixInverse" in camera) {
+      screenCameraProjectionMatrixInverse.value.copy(
+        camera.projectionMatrixInverse
+      );
+    } else {
+      screenCameraProjectionMatrixInverse.value.copy(camera.projectionMatrix).invert();
+    }
+    screenCameraMatrixWorld.value.copy(camera.matrixWorld);
+    screenCameraWorldPosition.value.setFromMatrixPosition(camera.matrixWorld);
+    screenCameraIsOrthographic.value = camera instanceof THREE.OrthographicCamera;
+    renderer.render(backgroundScene, backgroundCamera);
   };
   syncSettings(true);
   const dispose = () => {
@@ -3283,13 +3377,20 @@ var createAtmosphereSystem = (scene, initialSettings = DEFAULT_ATMOSPHERE_SETTIN
       clearTimeout(pendingReprimeTimeout);
       pendingReprimeTimeout = null;
     }
-    scene.remove(skyMesh);
+    if (skyMesh) {
+      scene.remove(skyMesh);
+    }
+    if (backgroundScene && backgroundQuad) {
+      backgroundScene.remove(backgroundQuad);
+      backgroundQuad.geometry.dispose();
+    }
     geometry.dispose();
     material.dispose();
     atmosphereContext.dispose();
   };
   return {
     prime,
+    renderBackground,
     setSettings,
     setSunDirection,
     setCameraPosition,
@@ -3581,6 +3682,9 @@ var createAtmosphereRig = (scene, options = {}) => {
       captureEnvironment(renderer, capturePositionScratch);
     }
   };
+  const renderBackground = (renderer, camera) => {
+    atmosphere.renderBackground(renderer, camera);
+  };
   const requestEnvironmentCapture = () => {
     environmentDirty = true;
   };
@@ -3640,6 +3744,7 @@ var createAtmosphereRig = (scene, options = {}) => {
     sunTarget,
     ambientLight,
     prime,
+    renderBackground,
     update,
     setSun,
     setSunAngles: (altitudeDeg, azimuthDeg) => {

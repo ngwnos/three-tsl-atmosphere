@@ -49,6 +49,7 @@ export type AtmosphereRig = {
   sunTarget: THREE.Object3D
   ambientLight: THREE.HemisphereLight
   prime: (renderer: WebGPURenderer) => Promise<void>
+  renderBackground: (renderer: WebGPURenderer, camera: THREE.Camera) => void
   update: (renderer: WebGPURenderer, camera?: THREE.Camera | null) => void
   setSun: (next: Partial<AtmosphereSunState>) => void
   setSunAngles: (altitudeDeg: number, azimuthDeg: number) => void
@@ -318,6 +319,10 @@ export const createAtmosphereRig = (
     }
   }
 
+  const renderBackground = (renderer: WebGPURenderer, camera: THREE.Camera): void => {
+    atmosphere.renderBackground(renderer, camera)
+  }
+
   const requestEnvironmentCapture = (): void => {
     environmentDirty = true
   }
@@ -386,6 +391,7 @@ export const createAtmosphereRig = (
     sunTarget,
     ambientLight,
     prime,
+    renderBackground,
     update,
     setSun,
     setSunAngles: (altitudeDeg: number, azimuthDeg: number) => {

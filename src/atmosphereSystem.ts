@@ -3,12 +3,15 @@ import { MeshBasicNodeMaterial, type WebGPURenderer } from 'three/webgpu'
 import {
   cos,
   Fn,
+  If,
   cameraPosition,
   dot,
   fwidth,
   float,
+  getViewPosition,
   normalize,
   positionWorld,
+  screenUV,
   select,
   smoothstep,
   sqrt,
@@ -85,10 +88,12 @@ export type AtmosphereSystemOptions = {
   worldUnitsPerMeter?: number
   skyDomeRadiusMeters?: number
   reprimeDebounceMs?: number
+  presentationMode?: 'sky-dome' | 'screen-space'
 }
 
 export type AtmosphereSystem = {
   prime: (renderer: WebGPURenderer) => Promise<void>
+  renderBackground: (renderer: WebGPURenderer, camera: THREE.Camera) => void
   setSettings: (next: AtmosphereSettings) => void
   setSunDirection: (directionWorld: THREE.Vector3) => void
   setCameraPosition: (positionWorld: THREE.Vector3) => void
@@ -100,6 +105,7 @@ export type AtmosphereSystem = {
 const DEFAULT_WORLD_UNITS_PER_METER = 1
 const DEFAULT_SKY_DOME_RADIUS_METERS = 50
 const DEFAULT_REPRIME_DEBOUNCE_MS = 160
+const DEFAULT_PRESENTATION_MODE = 'sky-dome' as const
 const PLANCK_CONSTANT = 6.62607015e-34
 const SPEED_OF_LIGHT = 299792458
 const BOLTZMANN_CONSTANT = 1.380649e-23
@@ -230,6 +236,7 @@ export const createAtmosphereSystem = (
     Number.isFinite(options.reprimeDebounceMs) && (options.reprimeDebounceMs ?? 0) >= 0
       ? (options.reprimeDebounceMs as number)
       : DEFAULT_REPRIME_DEBOUNCE_MS
+  const presentationMode = options.presentationMode ?? DEFAULT_PRESENTATION_MODE
 
   let settings: AtmosphereSettings = normalizeAtmosphereSettings(initialSettings)
 
@@ -250,15 +257,22 @@ export const createAtmosphereSystem = (
     new THREE.Vector3(settings.sunDiscColorR, settings.sunDiscColorG, settings.sunDiscColorB),
   )
   const sunDiscAngularRadius = uniform(parameters.sunAngularRadius)
+  const screenCameraProjectionMatrixInverse = uniform(new THREE.Matrix4())
+  const screenCameraMatrixWorld = uniform(new THREE.Matrix4())
+  const screenCameraWorldPosition = uniform(new THREE.Vector3())
+  const screenCameraIsOrthographic = uniform(false)
 
   const geometry = new THREE.SphereGeometry(skyDomeRadiusMeters * worldUnitsPerMeter, 64, 32)
 
-  const buildColorNode = () =>
+  const buildSkyLuminanceNode = (
+    cameraWorldPositionNode: ReturnType<typeof vec3>,
+    worldViewDirNode: ReturnType<typeof vec3>,
+    softenPlanetMask: boolean,
+  ) =>
     Fn(() => {
-      const worldViewDir = normalize(positionWorld.sub(cameraPosition)).toVar()
+      const worldViewDir = normalize(worldViewDirNode).toVar()
       const worldSunDir = normalize(atmosphereContext.sunDirectionWorld).toVar()
-
-      const cameraUnit = cameraPosition
+      const cameraUnit = cameraWorldPositionNode
         .sub(atmosphereContext.planetCenterWorld)
         .mul(atmosphereContext.worldToUnitScene)
         .toVar()
@@ -271,7 +285,11 @@ export const createAtmosphereSystem = (
       const sunChordVector = worldViewDir.sub(worldSunDir).toVar()
       const sunChordLength = dot(sunChordVector, sunChordVector).toVar()
       const sunFilterWidth = fwidth(sunChordLength).toVar()
-      const sunDisc = smoothstep(sunChordThreshold, sunChordThreshold.sub(sunFilterWidth), sunChordLength)
+      const sunDisc = smoothstep(
+        sunChordThreshold,
+        sunChordThreshold.sub(sunFilterWidth),
+        sunChordLength,
+      )
         .mul(sunDiscIntensity)
         .toVar()
       const sunDiscLuminance = getSolarLuminance()
@@ -279,6 +297,10 @@ export const createAtmosphereSystem = (
         .mul(sunDisc)
         .mul(skyTransfer.get('transmittance'))
         .toVar()
+
+      if (!softenPlanetMask) {
+        return skyLuminance.add(sunDiscLuminance)
+      }
 
       // When the viewer is in space, the planet limb becomes a hard
       // ground-intersection classification. Smooth the surface silhouette in
@@ -296,8 +318,46 @@ export const createAtmosphereSystem = (
         .toVar()
       const planetMask = select(applyPlanetMask, rawPlanetMask, float(1)).toVar()
 
-      return vec4(skyLuminance.add(sunDiscLuminance).mul(planetMask), float(1))
+      return skyLuminance.add(sunDiscLuminance).mul(planetMask)
     })().context({ atmosphere: atmosphereContext })
+
+  const buildColorNode = () =>
+    vec4(
+      buildSkyLuminanceNode(cameraPosition as ReturnType<typeof vec3>, positionWorld.sub(cameraPosition), true),
+      float(1),
+    )
+
+  const buildScreenSpaceColorNode = () =>
+    Fn(() => {
+      const viewPosition = getViewPosition(
+        screenUV,
+        float(1),
+        screenCameraProjectionMatrixInverse,
+      ).toVar()
+      const nearViewPosition = getViewPosition(
+        screenUV,
+        float(0),
+        screenCameraProjectionMatrixInverse,
+      ).toVar()
+      const originView = vec3(0, 0, 0).toVar()
+      const directionView = normalize(viewPosition).toVar()
+
+      If(screenCameraIsOrthographic, () => {
+        originView.assign(nearViewPosition)
+        directionView.assign(vec3(0, 0, -1))
+      })
+
+      const worldOrigin = screenCameraWorldPosition.toVar()
+      If(screenCameraIsOrthographic, () => {
+        worldOrigin.assign(screenCameraMatrixWorld.mul(vec4(originView, float(1))).xyz)
+      })
+
+      const worldViewDirection = normalize(
+        screenCameraMatrixWorld.mul(vec4(directionView, float(0))).xyz,
+      ).toVar()
+
+      return vec4(buildSkyLuminanceNode(worldOrigin, worldViewDirection, false), float(1))
+    })()
 
   const createSkyMaterial = (): MeshBasicNodeMaterial => {
     const material = new MeshBasicNodeMaterial()
@@ -308,12 +368,34 @@ export const createAtmosphereSystem = (
     return material
   }
 
-  let material = createSkyMaterial()
+  const createScreenSpaceMaterial = (): MeshBasicNodeMaterial => {
+    const material = new MeshBasicNodeMaterial()
+    material.depthTest = false
+    material.depthWrite = false
+    material.outputNode = buildScreenSpaceColorNode()
+    return material
+  }
 
-  const skyMesh = new THREE.Mesh(geometry, material)
-  skyMesh.frustumCulled = false
-  skyMesh.renderOrder = -100
-  scene.add(skyMesh)
+  let material = createSkyMaterial()
+  let skyMesh: THREE.Mesh | null = null
+  let backgroundScene: THREE.Scene | null = null
+  let backgroundCamera: THREE.OrthographicCamera | null = null
+  let backgroundQuad: THREE.Mesh | null = null
+
+  if (presentationMode === 'screen-space') {
+    backgroundScene = new THREE.Scene()
+    backgroundCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1)
+    backgroundQuad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), createScreenSpaceMaterial())
+    backgroundQuad.frustumCulled = false
+    backgroundScene.add(backgroundQuad)
+    material.dispose()
+    material = backgroundQuad.material as MeshBasicNodeMaterial
+  } else {
+    skyMesh = new THREE.Mesh(geometry, material)
+    skyMesh.frustumCulled = false
+    skyMesh.renderOrder = -100
+    scene.add(skyMesh)
+  }
 
   const sunScratch = new THREE.Vector3(0, 1, 0)
   const solarIrradianceScratch = new THREE.Vector3()
@@ -393,8 +475,14 @@ export const createAtmosphereSystem = (
     atmosphereContext.applyParameters(parametersSnapshot)
     atmosphereContext.planetCenterWorld.value.set(0, -planetRadiusMeters * worldUnitsPerMeter, 0)
     atmosphereContext.worldToUnitScene.value = parametersSnapshot.worldToUnit * metersPerWorldUnit
-    const nextMaterial = createSkyMaterial()
-    skyMesh.material = nextMaterial
+    const nextMaterial =
+      presentationMode === 'screen-space' ? createScreenSpaceMaterial() : createSkyMaterial()
+    if (skyMesh) {
+      skyMesh.material = nextMaterial
+    }
+    if (backgroundQuad) {
+      backgroundQuad.material = nextMaterial
+    }
     material.dispose()
     material = nextMaterial
   }
@@ -487,12 +575,36 @@ export const createAtmosphereSystem = (
   }
 
   const setCameraPosition = (positionWorld: THREE.Vector3): void => {
-    skyMesh.position.copy(positionWorld)
+    screenCameraWorldPosition.value.copy(positionWorld)
+    if (skyMesh) {
+      skyMesh.position.copy(positionWorld)
+    }
   }
 
   const setSkyLayer = (layer: number): void => {
     const clampedLayer = THREE.MathUtils.clamp(Math.floor(layer), 0, 31)
-    skyMesh.layers.set(clampedLayer)
+    if (skyMesh) {
+      skyMesh.layers.set(clampedLayer)
+    }
+  }
+
+  const renderBackground = (renderer: WebGPURenderer, camera: THREE.Camera): void => {
+    if (!backgroundScene || !backgroundCamera) {
+      return
+    }
+
+    camera.updateMatrixWorld()
+    if ('projectionMatrixInverse' in camera) {
+      screenCameraProjectionMatrixInverse.value.copy(
+        (camera as THREE.PerspectiveCamera | THREE.OrthographicCamera).projectionMatrixInverse,
+      )
+    } else {
+      screenCameraProjectionMatrixInverse.value.copy(camera.projectionMatrix).invert()
+    }
+    screenCameraMatrixWorld.value.copy(camera.matrixWorld)
+    screenCameraWorldPosition.value.setFromMatrixPosition(camera.matrixWorld)
+    screenCameraIsOrthographic.value = camera instanceof THREE.OrthographicCamera
+    renderer.render(backgroundScene, backgroundCamera)
   }
 
   syncSettings(true)
@@ -502,7 +614,13 @@ export const createAtmosphereSystem = (
       clearTimeout(pendingReprimeTimeout)
       pendingReprimeTimeout = null
     }
-    scene.remove(skyMesh)
+    if (skyMesh) {
+      scene.remove(skyMesh)
+    }
+    if (backgroundScene && backgroundQuad) {
+      backgroundScene.remove(backgroundQuad)
+      backgroundQuad.geometry.dispose()
+    }
     geometry.dispose()
     material.dispose()
     atmosphereContext.dispose()
@@ -510,6 +628,7 @@ export const createAtmosphereSystem = (
 
   return {
     prime,
+    renderBackground,
     setSettings,
     setSunDirection,
     setCameraPosition,

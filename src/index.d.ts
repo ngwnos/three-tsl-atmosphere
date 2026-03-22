@@ -38,10 +38,12 @@ export type AtmosphereSystemOptions = {
   worldUnitsPerMeter?: number
   skyDomeRadiusMeters?: number
   reprimeDebounceMs?: number
+  presentationMode?: 'sky-dome' | 'screen-space'
 }
 
 export type AtmosphereSystem = {
   prime: (renderer: WebGPURenderer) => Promise<void>
+  renderBackground: (renderer: WebGPURenderer, camera: THREE.Camera) => void
   setSettings: (next: AtmosphereSettings) => void
   setSunDirection: (directionWorld: THREE.Vector3) => void
   setCameraPosition: (positionWorld: THREE.Vector3) => void
@@ -113,6 +115,7 @@ export type AtmosphereRig = {
   sunTarget: THREE.Object3D
   ambientLight: THREE.HemisphereLight
   prime: (renderer: WebGPURenderer) => Promise<void>
+  renderBackground: (renderer: WebGPURenderer, camera: THREE.Camera) => void
   update: (renderer: WebGPURenderer, camera?: THREE.Camera | null) => void
   setSun: (next: Partial<AtmosphereSunState>) => void
   setSunAngles: (altitudeDeg: number, azimuthDeg: number) => void
