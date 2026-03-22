@@ -26,16 +26,11 @@ const DEFAULT_EXPOSURE = 1
 const DEFAULT_DISPLAY_DISTANCE = 90
 const MOON_VISIBILITY_EPSILON = 1e-5
 
-const projectMoonToPixelRadius = (
+const buildMoonViewBasis = (
   camera,
   viewDirection,
-  displayDistance,
-  angularRadiusRad,
-  width,
-  height,
   targetRight = new THREE.Vector3(),
   targetUp = new THREE.Vector3(),
-  scratchEdge = new THREE.Vector3(),
 ) => {
   targetUp.set(0, 1, 0).applyQuaternion(camera.quaternion)
   targetUp.addScaledVector(viewDirection, -targetUp.dot(viewDirection))
@@ -45,24 +40,34 @@ const projectMoonToPixelRadius = (
   }
   targetUp.normalize()
   targetRight.crossVectors(viewDirection, targetUp).normalize()
+}
 
-  const edgeDirection = scratchEdge
-    .copy(viewDirection)
-    .multiplyScalar(Math.cos(angularRadiusRad))
-    .addScaledVector(targetRight, Math.sin(angularRadiusRad))
-    .normalize()
-  const edgeNdc = camera.position
-    .clone()
-    .addScaledVector(edgeDirection, displayDistance)
-    .project(camera)
-  const centerNdc = camera.position
-    .clone()
-    .addScaledVector(viewDirection, displayDistance)
-    .project(camera)
+const projectMoonToPixelRadius = (
+  camera,
+  angularRadiusRad,
+  width,
+  height,
+) => {
+  if (camera instanceof THREE.PerspectiveCamera) {
+    const verticalFovRad = THREE.MathUtils.degToRad(camera.fov)
+    const horizontalFovRad =
+      2 * Math.atan(Math.tan(verticalFovRad * 0.5) * camera.aspect)
+    const radiusXPx =
+      Math.tan(angularRadiusRad) / Math.tan(horizontalFovRad * 0.5) * width * 0.5
+    const radiusYPx =
+      Math.tan(angularRadiusRad) / Math.tan(verticalFovRad * 0.5) * height * 0.5
+    return Math.max(radiusXPx, radiusYPx)
+  }
 
-  const deltaXPx = (edgeNdc.x - centerNdc.x) * width * 0.5
-  const deltaYPx = (edgeNdc.y - centerNdc.y) * height * 0.5
-  return Math.hypot(deltaXPx, deltaYPx)
+  if (camera instanceof THREE.OrthographicCamera) {
+    const visibleWidth = Math.max(1e-6, camera.right - camera.left)
+    const visibleHeight = Math.max(1e-6, camera.top - camera.bottom)
+    const radiusXPx = Math.tan(angularRadiusRad) * (width / visibleWidth)
+    const radiusYPx = Math.tan(angularRadiusRad) * (height / visibleHeight)
+    return Math.max(radiusXPx, radiusYPx)
+  }
+
+  return 0
 }
 
 const createMoonSelectionNode = (moonStates, transmittanceTextureNode) =>
@@ -185,8 +190,6 @@ export class MoonOverlay {
     this.tmpProjectedWorld = new THREE.Vector3()
     this.tmpRight = new THREE.Vector3()
     this.tmpUp = new THREE.Vector3()
-    this.tmpEdge = new THREE.Vector3()
-
     this.sharedGeometry = new THREE.PlaneGeometry(2, 2)
     this.colorQuad = new THREE.Mesh(
       this.sharedGeometry,
@@ -264,21 +267,13 @@ export class MoonOverlay {
     const angularRadiusRad = Math.asin(
       THREE.MathUtils.clamp((moon.radiusM * this.sizeScale) / distanceMeters, 1e-8, 0.999999),
     )
-    const radiusPx = projectMoonToPixelRadius(
-      camera,
-      this.tmpViewDirection,
-      this.displayDistance,
-      angularRadiusRad,
-      width,
-      height,
-      this.tmpRight,
-      this.tmpUp,
-      this.tmpEdge,
-    )
+    const radiusPx = projectMoonToPixelRadius(camera, angularRadiusRad, width, height)
     if (!Number.isFinite(radiusPx) || radiusPx <= 1e-4) {
       moonState.active.value = 0
       return
     }
+
+    buildMoonViewBasis(camera, this.tmpViewDirection, this.tmpRight, this.tmpUp)
 
     const centerXPx = (this.tmpProjectedCenter.x * 0.5 + 0.5) * width
     const centerYPx = (0.5 - this.tmpProjectedCenter.y * 0.5) * height
