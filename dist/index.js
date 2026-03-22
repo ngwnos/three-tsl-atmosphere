@@ -3176,7 +3176,7 @@ var createAtmosphereSystem = (scene, initialSettings = DEFAULT_ATMOSPHERE_SETTIN
     const skyLuminance = buildSkyLuminanceNode(worldOrigin, worldViewDirection, false).toVar();
     const compositeLuminance = skyLuminance.add(skyTransfer.get("transmittance").mul(celestialSample)).toVar();
     return vec45(compositeLuminance, float4(1));
-  })();
+  })().context({ atmosphere: atmosphereContext });
   const createSkyMaterial = () => {
     const material2 = new MeshBasicNodeMaterial();
     material2.side = THREE.BackSide;

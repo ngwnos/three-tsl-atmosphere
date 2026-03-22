@@ -372,7 +372,7 @@ export const createAtmosphereSystem = (
         .toVar()
 
       return vec4(compositeLuminance, float(1))
-    })()
+    })().context({ atmosphere: atmosphereContext })
 
   const createSkyMaterial = (): MeshBasicNodeMaterial => {
     const material = new MeshBasicNodeMaterial()
