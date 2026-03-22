@@ -15,12 +15,9 @@ import {
   select,
   smoothstep,
   sqrt,
-  texture,
-  uvec2,
   uniform,
   vec3,
   vec4,
-  viewportCoordinate,
 } from 'three/tsl'
 
 import { AtmosphereContextNode } from './bruneton/AtmosphereContextNode'
@@ -97,7 +94,7 @@ export type AtmosphereSystemOptions = {
 export type AtmosphereSystem = {
   prime: (renderer: WebGPURenderer) => Promise<void>
   renderBackground: (renderer: WebGPURenderer, camera: THREE.Camera) => void
-  setCelestialTexture: (texture: THREE.Texture | null) => void
+  renderTransmittance: (renderer: WebGPURenderer, camera: THREE.Camera) => void
   setSettings: (next: AtmosphereSettings) => void
   setSunDirection: (directionWorld: THREE.Vector3) => void
   setCameraPosition: (positionWorld: THREE.Vector3) => void
@@ -265,7 +262,6 @@ export const createAtmosphereSystem = (
   const screenCameraMatrixWorld = uniform(new THREE.Matrix4())
   const screenCameraWorldPosition = uniform(new THREE.Vector3())
   const screenCameraIsOrthographic = uniform(false)
-  const celestialTextureNode = texture(new THREE.Texture())
 
   const geometry = new THREE.SphereGeometry(skyDomeRadiusMeters * worldUnitsPerMeter, 64, 32)
 
@@ -360,20 +356,47 @@ export const createAtmosphereSystem = (
       const worldViewDirection = normalize(
         screenCameraMatrixWorld.mul(vec4(directionView, float(0))).xyz,
       ).toVar()
-      const celestialSample = celestialTextureNode.load(uvec2(viewportCoordinate)).rgb.toVar()
+      const skyLuminance = buildSkyLuminanceNode(worldOrigin, worldViewDirection, false).toVar()
 
+      return vec4(skyLuminance, float(1))
+    })().context({ atmosphere: atmosphereContext })
+
+  const buildScreenSpaceTransmittanceNode = () =>
+    Fn(() => {
+      const viewPosition = getViewPosition(
+        screenUV,
+        float(1),
+        screenCameraProjectionMatrixInverse,
+      ).toVar()
+      const nearViewPosition = getViewPosition(
+        screenUV,
+        float(0),
+        screenCameraProjectionMatrixInverse,
+      ).toVar()
+      const originView = vec3(0, 0, 0).toVar()
+      const directionView = normalize(viewPosition).toVar()
+
+      If(screenCameraIsOrthographic, () => {
+        originView.assign(nearViewPosition)
+        directionView.assign(vec3(0, 0, -1))
+      })
+
+      const worldOrigin = screenCameraWorldPosition.toVar()
+      If(screenCameraIsOrthographic, () => {
+        worldOrigin.assign(screenCameraMatrixWorld.mul(vec4(originView, float(1))).xyz)
+      })
+
+      const worldViewDirection = normalize(
+        screenCameraMatrixWorld.mul(vec4(directionView, float(0))).xyz,
+      ).toVar()
       const cameraUnit = worldOrigin
         .sub(atmosphereContext.planetCenterWorld)
         .mul(atmosphereContext.worldToUnitScene)
         .toVar()
       const worldSunDir = normalize(atmosphereContext.sunDirectionWorld).toVar()
       const skyTransfer = getSkyLuminance(cameraUnit, worldViewDirection, float(0), worldSunDir).toVar()
-      const skyLuminance = buildSkyLuminanceNode(worldOrigin, worldViewDirection, false).toVar()
-      const compositeLuminance = skyLuminance
-        .add(skyTransfer.get('transmittance').mul(celestialSample))
-        .toVar()
 
-      return vec4(compositeLuminance, float(1))
+      return vec4(skyTransfer.get('transmittance'), float(1))
     })().context({ atmosphere: atmosphereContext })
 
   const createSkyMaterial = (): MeshBasicNodeMaterial => {
@@ -393,11 +416,22 @@ export const createAtmosphereSystem = (
     return material
   }
 
+  const createScreenSpaceTransmittanceMaterial = (): MeshBasicNodeMaterial => {
+    const material = new MeshBasicNodeMaterial()
+    material.depthTest = false
+    material.depthWrite = false
+    material.outputNode = buildScreenSpaceTransmittanceNode()
+    return material
+  }
+
   let material = createSkyMaterial()
   let skyMesh: THREE.Mesh | null = null
   let backgroundScene: THREE.Scene | null = null
   let backgroundCamera: THREE.OrthographicCamera | null = null
   let backgroundQuad: THREE.Mesh | null = null
+  let transmittanceScene: THREE.Scene | null = null
+  let transmittanceCamera: THREE.OrthographicCamera | null = null
+  let transmittanceQuad: THREE.Mesh | null = null
 
   if (presentationMode === 'screen-space') {
     backgroundScene = new THREE.Scene()
@@ -405,6 +439,14 @@ export const createAtmosphereSystem = (
     backgroundQuad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), createScreenSpaceMaterial())
     backgroundQuad.frustumCulled = false
     backgroundScene.add(backgroundQuad)
+    transmittanceScene = new THREE.Scene()
+    transmittanceCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1)
+    transmittanceQuad = new THREE.Mesh(
+      new THREE.PlaneGeometry(2, 2),
+      createScreenSpaceTransmittanceMaterial(),
+    )
+    transmittanceQuad.frustumCulled = false
+    transmittanceScene.add(transmittanceQuad)
     material.dispose()
     material = backgroundQuad.material as MeshBasicNodeMaterial
   } else {
@@ -605,15 +647,7 @@ export const createAtmosphereSystem = (
     }
   }
 
-  const setCelestialTexture = (nextTexture: THREE.Texture | null): void => {
-    celestialTextureNode.value = nextTexture ?? new THREE.Texture()
-  }
-
-  const renderBackground = (renderer: WebGPURenderer, camera: THREE.Camera): void => {
-    if (!backgroundScene || !backgroundCamera) {
-      return
-    }
-
+  const syncScreenCameraUniforms = (camera: THREE.Camera): void => {
     camera.updateMatrixWorld()
     if ('projectionMatrixInverse' in camera) {
       screenCameraProjectionMatrixInverse.value.copy(
@@ -625,7 +659,24 @@ export const createAtmosphereSystem = (
     screenCameraMatrixWorld.value.copy(camera.matrixWorld)
     screenCameraWorldPosition.value.setFromMatrixPosition(camera.matrixWorld)
     screenCameraIsOrthographic.value = camera instanceof THREE.OrthographicCamera
+  }
+
+  const renderBackground = (renderer: WebGPURenderer, camera: THREE.Camera): void => {
+    if (!backgroundScene || !backgroundCamera) {
+      return
+    }
+
+    syncScreenCameraUniforms(camera)
     renderer.render(backgroundScene, backgroundCamera)
+  }
+
+  const renderTransmittance = (renderer: WebGPURenderer, camera: THREE.Camera): void => {
+    if (!transmittanceScene || !transmittanceCamera) {
+      return
+    }
+
+    syncScreenCameraUniforms(camera)
+    renderer.render(transmittanceScene, transmittanceCamera)
   }
 
   syncSettings(true)
@@ -642,6 +693,11 @@ export const createAtmosphereSystem = (
       backgroundScene.remove(backgroundQuad)
       backgroundQuad.geometry.dispose()
     }
+    if (transmittanceScene && transmittanceQuad) {
+      transmittanceScene.remove(transmittanceQuad)
+      transmittanceQuad.geometry.dispose()
+      transmittanceQuad.material.dispose()
+    }
     geometry.dispose()
     material.dispose()
     atmosphereContext.dispose()
@@ -650,7 +706,7 @@ export const createAtmosphereSystem = (
   return {
     prime,
     renderBackground,
-    setCelestialTexture,
+    renderTransmittance,
     setSettings,
     setSunDirection,
     setCameraPosition,

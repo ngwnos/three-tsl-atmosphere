@@ -16,7 +16,6 @@ import {
   select as select4,
   smoothstep as smoothstep3,
   sqrt as sqrt4,
-  texture as texture2,
   uniform as uniform4,
   vec3 as vec36,
   vec4 as vec45
@@ -376,8 +375,8 @@ var OutputTextureNode = class extends TextureNode {
     return "OutputTextureNode";
   }
   owner;
-  constructor(owner, texture3) {
-    super(texture3);
+  constructor(owner, texture2) {
+    super(texture2);
     this.owner = owner;
     this.updateMatrix = false;
   }
@@ -398,8 +397,8 @@ var OutputTexture3DNode = class extends Texture3DNode {
     return "OutputTexture3DNode";
   }
   owner;
-  constructor(owner, texture3) {
-    super(texture3);
+  constructor(owner, texture2) {
+    super(texture2);
     this.owner = owner;
     this.updateMatrix = false;
   }
@@ -1951,70 +1950,70 @@ var computeIndirectIrradianceTexture = /* @__PURE__ */ FnLayout({
 
 // src/bruneton/AtmosphereLUTTexturesWebGPU.ts
 function createStorageTexture(name) {
-  const texture3 = new StorageTexture(1, 1);
-  texture3.minFilter = LinearFilter;
-  texture3.magFilter = LinearFilter;
-  texture3.colorSpace = NoColorSpace;
-  texture3.generateMipmaps = false;
-  texture3.name = name;
-  return texture3;
+  const texture2 = new StorageTexture(1, 1);
+  texture2.minFilter = LinearFilter;
+  texture2.magFilter = LinearFilter;
+  texture2.colorSpace = NoColorSpace;
+  texture2.generateMipmaps = false;
+  texture2.name = name;
+  return texture2;
 }
 function createStorage3DTexture(name) {
-  const texture3 = new Storage3DTexture(1, 1, 1);
-  texture3.minFilter = LinearFilter;
-  texture3.magFilter = LinearFilter;
-  texture3.colorSpace = NoColorSpace;
-  texture3.generateMipmaps = false;
-  texture3.name = name;
-  return texture3;
+  const texture2 = new Storage3DTexture(1, 1, 1);
+  texture2.minFilter = LinearFilter;
+  texture2.magFilter = LinearFilter;
+  texture2.colorSpace = NoColorSpace;
+  texture2.generateMipmaps = false;
+  texture2.name = name;
+  return texture2;
 }
 function createReadTexture(name) {
-  const texture3 = new DataTexture();
-  texture3.minFilter = LinearFilter;
-  texture3.magFilter = LinearFilter;
-  texture3.colorSpace = NoColorSpace;
-  texture3.generateMipmaps = false;
-  texture3.name = name;
-  return texture3;
+  const texture2 = new DataTexture();
+  texture2.minFilter = LinearFilter;
+  texture2.magFilter = LinearFilter;
+  texture2.colorSpace = NoColorSpace;
+  texture2.generateMipmaps = false;
+  texture2.name = name;
+  return texture2;
 }
 function createRead3DTexture(name) {
-  const texture3 = new Data3DTexture(null, 1, 1, 1);
-  texture3.minFilter = LinearFilter;
-  texture3.magFilter = LinearFilter;
-  texture3.colorSpace = NoColorSpace;
-  texture3.generateMipmaps = false;
-  texture3.name = name;
-  return texture3;
+  const texture2 = new Data3DTexture(null, 1, 1, 1);
+  texture2.minFilter = LinearFilter;
+  texture2.magFilter = LinearFilter;
+  texture2.colorSpace = NoColorSpace;
+  texture2.generateMipmaps = false;
+  texture2.name = name;
+  return texture2;
 }
-function setupStorageTexture(texture3, textureType, size) {
-  texture3.type = textureType;
-  reinterpretType(texture3.image);
-  texture3.image.width = size.x;
-  texture3.image.height = size.y;
+function setupStorageTexture(texture2, textureType, size) {
+  texture2.type = textureType;
+  reinterpretType(texture2.image);
+  texture2.image.width = size.x;
+  texture2.image.height = size.y;
 }
-function setupReadTexture(texture3, textureType, size) {
-  texture3.type = textureType;
-  reinterpretType(texture3.image);
-  texture3.image.width = size.x;
-  texture3.image.height = size.y;
-  texture3.source.dataReady = false;
-  texture3.needsUpdate = true;
+function setupReadTexture(texture2, textureType, size) {
+  texture2.type = textureType;
+  reinterpretType(texture2.image);
+  texture2.image.width = size.x;
+  texture2.image.height = size.y;
+  texture2.source.dataReady = false;
+  texture2.needsUpdate = true;
 }
-function setupStorage3DTexture(texture3, textureType, size) {
-  texture3.type = textureType;
-  reinterpretType(texture3.image);
-  texture3.image.width = size.x;
-  texture3.image.height = size.y;
-  texture3.image.depth = size.z;
+function setupStorage3DTexture(texture2, textureType, size) {
+  texture2.type = textureType;
+  reinterpretType(texture2.image);
+  texture2.image.width = size.x;
+  texture2.image.height = size.y;
+  texture2.image.depth = size.z;
 }
-function setupRead3DTexture(texture3, textureType, size) {
-  texture3.type = textureType;
-  reinterpretType(texture3.image);
-  texture3.image.width = size.x;
-  texture3.image.height = size.y;
-  texture3.image.depth = size.z;
-  texture3.source.dataReady = false;
-  texture3.needsUpdate = true;
+function setupRead3DTexture(texture2, textureType, size) {
+  texture2.type = textureType;
+  reinterpretType(texture2.image);
+  texture2.image.width = size.x;
+  texture2.image.height = size.y;
+  texture2.image.depth = size.z;
+  texture2.source.dataReady = false;
+  texture2.needsUpdate = true;
 }
 var AtmosphereLUTTexturesContextWebGPU = class extends AtmosphereLUTTexturesContext {
   opticalDepth = createStorageTexture("opticalDepth");
@@ -3108,7 +3107,6 @@ var createAtmosphereSystem = (scene, initialSettings = DEFAULT_ATMOSPHERE_SETTIN
   const screenCameraMatrixWorld = uniform4(new THREE.Matrix4());
   const screenCameraWorldPosition = uniform4(new THREE.Vector3());
   const screenCameraIsOrthographic = uniform4(false);
-  const celestialTextureNode = texture2(new THREE.Texture());
   const geometry = new THREE.SphereGeometry(skyDomeRadiusMeters * worldUnitsPerMeter, 64, 32);
   const buildSkyLuminanceNode = (cameraWorldPositionNode, worldViewDirNode, softenPlanetMask) => Fn4(() => {
     const worldViewDir = normalize(worldViewDirNode).toVar();
@@ -3169,13 +3167,37 @@ var createAtmosphereSystem = (scene, initialSettings = DEFAULT_ATMOSPHERE_SETTIN
     const worldViewDirection = normalize(
       screenCameraMatrixWorld.mul(vec45(directionView, float4(0))).xyz
     ).toVar();
-    const celestialSample = texture2(celestialTextureNode, screenUV).rgb.toVar();
+    const skyLuminance = buildSkyLuminanceNode(worldOrigin, worldViewDirection, false).toVar();
+    return vec45(skyLuminance, float4(1));
+  })().context({ atmosphere: atmosphereContext });
+  const buildScreenSpaceTransmittanceNode = () => Fn4(() => {
+    const viewPosition = getViewPosition(
+      screenUV,
+      float4(1),
+      screenCameraProjectionMatrixInverse
+    ).toVar();
+    const nearViewPosition = getViewPosition(
+      screenUV,
+      float4(0),
+      screenCameraProjectionMatrixInverse
+    ).toVar();
+    const originView = vec36(0, 0, 0).toVar();
+    const directionView = normalize(viewPosition).toVar();
+    If5(screenCameraIsOrthographic, () => {
+      originView.assign(nearViewPosition);
+      directionView.assign(vec36(0, 0, -1));
+    });
+    const worldOrigin = screenCameraWorldPosition.toVar();
+    If5(screenCameraIsOrthographic, () => {
+      worldOrigin.assign(screenCameraMatrixWorld.mul(vec45(originView, float4(1))).xyz);
+    });
+    const worldViewDirection = normalize(
+      screenCameraMatrixWorld.mul(vec45(directionView, float4(0))).xyz
+    ).toVar();
     const cameraUnit = worldOrigin.sub(atmosphereContext.planetCenterWorld).mul(atmosphereContext.worldToUnitScene).toVar();
     const worldSunDir = normalize(atmosphereContext.sunDirectionWorld).toVar();
     const skyTransfer = getSkyLuminance(cameraUnit, worldViewDirection, float4(0), worldSunDir).toVar();
-    const skyLuminance = buildSkyLuminanceNode(worldOrigin, worldViewDirection, false).toVar();
-    const compositeLuminance = skyLuminance.add(skyTransfer.get("transmittance").mul(celestialSample)).toVar();
-    return vec45(compositeLuminance, float4(1));
+    return vec45(skyTransfer.get("transmittance"), float4(1));
   })().context({ atmosphere: atmosphereContext });
   const createSkyMaterial = () => {
     const material2 = new MeshBasicNodeMaterial();
@@ -3192,17 +3214,35 @@ var createAtmosphereSystem = (scene, initialSettings = DEFAULT_ATMOSPHERE_SETTIN
     material2.outputNode = buildScreenSpaceColorNode();
     return material2;
   };
+  const createScreenSpaceTransmittanceMaterial = () => {
+    const material2 = new MeshBasicNodeMaterial();
+    material2.depthTest = false;
+    material2.depthWrite = false;
+    material2.outputNode = buildScreenSpaceTransmittanceNode();
+    return material2;
+  };
   let material = createSkyMaterial();
   let skyMesh = null;
   let backgroundScene = null;
   let backgroundCamera = null;
   let backgroundQuad = null;
+  let transmittanceScene = null;
+  let transmittanceCamera = null;
+  let transmittanceQuad = null;
   if (presentationMode === "screen-space") {
     backgroundScene = new THREE.Scene();
     backgroundCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
     backgroundQuad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), createScreenSpaceMaterial());
     backgroundQuad.frustumCulled = false;
     backgroundScene.add(backgroundQuad);
+    transmittanceScene = new THREE.Scene();
+    transmittanceCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+    transmittanceQuad = new THREE.Mesh(
+      new THREE.PlaneGeometry(2, 2),
+      createScreenSpaceTransmittanceMaterial()
+    );
+    transmittanceQuad.frustumCulled = false;
+    transmittanceScene.add(transmittanceQuad);
     material.dispose();
     material = backgroundQuad.material;
   } else {
@@ -3362,13 +3402,7 @@ var createAtmosphereSystem = (scene, initialSettings = DEFAULT_ATMOSPHERE_SETTIN
       skyMesh.layers.set(clampedLayer);
     }
   };
-  const setCelestialTexture = (nextTexture) => {
-    celestialTextureNode.value = nextTexture ?? new THREE.Texture();
-  };
-  const renderBackground = (renderer, camera) => {
-    if (!backgroundScene || !backgroundCamera) {
-      return;
-    }
+  const syncScreenCameraUniforms = (camera) => {
     camera.updateMatrixWorld();
     if ("projectionMatrixInverse" in camera) {
       screenCameraProjectionMatrixInverse.value.copy(
@@ -3380,7 +3414,20 @@ var createAtmosphereSystem = (scene, initialSettings = DEFAULT_ATMOSPHERE_SETTIN
     screenCameraMatrixWorld.value.copy(camera.matrixWorld);
     screenCameraWorldPosition.value.setFromMatrixPosition(camera.matrixWorld);
     screenCameraIsOrthographic.value = camera instanceof THREE.OrthographicCamera;
+  };
+  const renderBackground = (renderer, camera) => {
+    if (!backgroundScene || !backgroundCamera) {
+      return;
+    }
+    syncScreenCameraUniforms(camera);
     renderer.render(backgroundScene, backgroundCamera);
+  };
+  const renderTransmittance = (renderer, camera) => {
+    if (!transmittanceScene || !transmittanceCamera) {
+      return;
+    }
+    syncScreenCameraUniforms(camera);
+    renderer.render(transmittanceScene, transmittanceCamera);
   };
   syncSettings(true);
   const dispose = () => {
@@ -3395,6 +3442,11 @@ var createAtmosphereSystem = (scene, initialSettings = DEFAULT_ATMOSPHERE_SETTIN
       backgroundScene.remove(backgroundQuad);
       backgroundQuad.geometry.dispose();
     }
+    if (transmittanceScene && transmittanceQuad) {
+      transmittanceScene.remove(transmittanceQuad);
+      transmittanceQuad.geometry.dispose();
+      transmittanceQuad.material.dispose();
+    }
     geometry.dispose();
     material.dispose();
     atmosphereContext.dispose();
@@ -3402,7 +3454,7 @@ var createAtmosphereSystem = (scene, initialSettings = DEFAULT_ATMOSPHERE_SETTIN
   return {
     prime,
     renderBackground,
-    setCelestialTexture,
+    renderTransmittance,
     setSettings,
     setSunDirection,
     setCameraPosition,
@@ -3697,8 +3749,8 @@ var createAtmosphereRig = (scene, options = {}) => {
   const renderBackground = (renderer, camera) => {
     atmosphere.renderBackground(renderer, camera);
   };
-  const setCelestialTexture = (texture3) => {
-    atmosphere.setCelestialTexture(texture3);
+  const renderTransmittance = (renderer, camera) => {
+    atmosphere.renderTransmittance(renderer, camera);
   };
   const requestEnvironmentCapture = () => {
     environmentDirty = true;
@@ -3760,7 +3812,7 @@ var createAtmosphereRig = (scene, options = {}) => {
     ambientLight,
     prime,
     renderBackground,
-    setCelestialTexture,
+    renderTransmittance,
     update,
     setSun,
     setSunAngles: (altitudeDeg, azimuthDeg) => {

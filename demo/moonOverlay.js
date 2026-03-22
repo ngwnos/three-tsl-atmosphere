@@ -1,6 +1,8 @@
 import * as THREE from 'three'
 import { MeshBasicNodeMaterial } from 'three/webgpu'
 import {
+  Fn,
+  If,
   dot,
   float,
   fwidth,
@@ -8,11 +10,13 @@ import {
   normalize,
   smoothstep,
   sqrt,
+  texture,
   uniform,
-  uv,
+  uvec2,
   vec2,
   vec3,
   vec4,
+  viewportCoordinate,
 } from 'three/tsl'
 
 import { computeKeplerOrbitPosition } from './astronomy.js'
@@ -20,63 +24,15 @@ import { computeKeplerOrbitPosition } from './astronomy.js'
 const DEFAULT_MAX_MOONS = 16
 const DEFAULT_EXPOSURE = 1
 const DEFAULT_DISPLAY_DISTANCE = 90
+const MOON_VISIBILITY_EPSILON = 1e-5
 
-const createMoonMaterial = () => {
-  const moonColor = uniform(new THREE.Vector3(1, 1, 1))
-  const lightLocal = uniform(new THREE.Vector3(0, 0, 1))
-
-  const material = new MeshBasicNodeMaterial()
-  material.outputNode = (() => {
-    const discUv = uv().mul(2).sub(vec2(1, 1)).toVar()
-    const discRadiusSquared = dot(discUv, discUv).toVar()
-    const edgeWidth = fwidth(discRadiusSquared).max(float(1e-4)).mul(1.5).toVar()
-    const discMask = smoothstep(
-      float(1).add(edgeWidth),
-      float(1).sub(edgeWidth),
-      discRadiusSquared,
-    ).toVar()
-    const normalZ = sqrt(float(1).sub(discRadiusSquared).max(float(0))).toVar()
-    const normalLocal = vec3(discUv.x, discUv.y, normalZ).toVar()
-    const lambert = max(dot(normalLocal, normalize(lightLocal)), float(0)).toVar()
-    return vec4(moonColor.mul(lambert), discMask)
-  })()
-  material.transparent = true
-  material.depthTest = false
-  material.depthWrite = false
-  material.toneMapped = false
-
-  return {
-    material,
-    moonColor,
-    lightLocal,
-  }
-}
-
-const segmentIntersectsSphere = (start, end, center, radius) => {
-  const direction = end.clone().sub(start)
-  const offset = start.clone().sub(center)
-  const a = direction.lengthSq()
-  const b = 2 * offset.dot(direction)
-  const c = offset.lengthSq() - radius * radius
-  const discriminant = b * b - 4 * a * c
-
-  if (discriminant < 0 || a <= 1e-8) {
-    return false
-  }
-
-  const sqrtDiscriminant = Math.sqrt(discriminant)
-  const inverseDenominator = 0.5 / a
-  const t0 = (-b - sqrtDiscriminant) * inverseDenominator
-  const t1 = (-b + sqrtDiscriminant) * inverseDenominator
-  return (t0 > 0 && t0 < 1) || (t1 > 0 && t1 < 1)
-}
-
-const projectMoonToNdcRadius = (
+const projectMoonToPixelRadius = (
   camera,
   viewDirection,
   displayDistance,
   angularRadiusRad,
-  centerNdc,
+  width,
+  height,
   targetRight = new THREE.Vector3(),
   targetUp = new THREE.Vector3(),
   scratchEdge = new THREE.Vector3(),
@@ -99,15 +55,104 @@ const projectMoonToNdcRadius = (
     .clone()
     .addScaledVector(edgeDirection, displayDistance)
     .project(camera)
+  const centerNdc = camera.position
+    .clone()
+    .addScaledVector(viewDirection, displayDistance)
+    .project(camera)
 
-  return Math.hypot(edgeNdc.x - centerNdc.x, edgeNdc.y - centerNdc.y)
+  const deltaXPx = (edgeNdc.x - centerNdc.x) * width * 0.5
+  const deltaYPx = (edgeNdc.y - centerNdc.y) * height * 0.5
+  return Math.hypot(deltaXPx, deltaYPx)
+}
+
+const createMoonSelectionNode = (moonStates, transmittanceTextureNode) =>
+  Fn(() => {
+    const pixelCoord = viewportCoordinate.toVar()
+    const pixelCoordU = uvec2(pixelCoord).toVar()
+    const transmittance = transmittanceTextureNode.load(pixelCoordU).rgb.toVar()
+    const transmittanceMagnitude = transmittance.x
+      .add(transmittance.y)
+      .add(transmittance.z)
+      .toVar()
+    const bestDistance = float(1e20).toVar()
+    const bestContribution = vec3(0, 0, 0).toVar()
+    const bestMask = float(0).toVar()
+
+    for (const moonState of moonStates) {
+      If(moonState.active.greaterThan(0.5), () => {
+        const radiusPx = moonState.centerRadiusDistance.z.max(float(1e-4)).toVar()
+        const discUv = pixelCoord
+          .sub(moonState.centerRadiusDistance.xy)
+          .div(vec2(radiusPx, radiusPx))
+          .toVar()
+        const discRadiusSquared = dot(discUv, discUv).toVar()
+        const edgeWidth = fwidth(discRadiusSquared).max(float(1e-4)).mul(1.5).toVar()
+        const discMask = smoothstep(
+          float(1).add(edgeWidth),
+          float(1).sub(edgeWidth),
+          discRadiusSquared,
+        ).toVar()
+
+        If(
+          discMask.greaterThan(float(1e-4)).and(
+            transmittanceMagnitude.greaterThan(float(MOON_VISIBILITY_EPSILON)),
+          ),
+          () => {
+            If(moonState.centerRadiusDistance.w.lessThan(bestDistance), () => {
+              const normalZ = sqrt(float(1).sub(discRadiusSquared).max(float(0))).toVar()
+              const normalLocal = vec3(discUv.x, discUv.y, normalZ).toVar()
+              const lambert = max(
+                dot(normalLocal, normalize(moonState.lightLocal)),
+                float(0),
+              ).toVar()
+
+              bestDistance.assign(moonState.centerRadiusDistance.w)
+              bestContribution.assign(moonState.color.mul(lambert).mul(discMask))
+              bestMask.assign(discMask)
+            })
+          },
+        )
+      })
+    }
+
+    return vec4(bestContribution.mul(transmittance), bestMask)
+  })()
+
+const createMoonColorMaterial = (moonStates, transmittanceTextureNode) => {
+  const material = new MeshBasicNodeMaterial()
+  const moonSelection = createMoonSelectionNode(moonStates, transmittanceTextureNode)
+  material.outputNode = Fn(() => {
+    const moon = moonSelection.toVar()
+    return vec4(moon.rgb, float(1))
+  })()
+  material.depthTest = false
+  material.depthWrite = false
+  material.transparent = true
+  material.blending = THREE.AdditiveBlending
+  material.toneMapped = false
+  return material
+}
+
+const createMoonMaskMaterial = (moonStates, transmittanceTextureNode) => {
+  const material = new MeshBasicNodeMaterial()
+  const moonSelection = createMoonSelectionNode(moonStates, transmittanceTextureNode)
+  material.outputNode = Fn(() => {
+    const moon = moonSelection.toVar()
+    return vec4(vec3(moon.a), float(1))
+  })()
+  material.depthTest = false
+  material.depthWrite = false
+  material.transparent = false
+  material.toneMapped = false
+  return material
 }
 
 export class MoonOverlay {
   constructor(options = {}) {
     this.maxMoons = Math.max(1, Math.floor(options.maxMoons ?? DEFAULT_MAX_MOONS))
-    this.overlayScene = new THREE.Scene()
     this.overlayCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1)
+    this.colorScene = new THREE.Scene()
+    this.maskScene = new THREE.Scene()
     this.planetCenter = new THREE.Vector3()
     this.planetRadius = 1
     this.equatorialToLocal = new THREE.Matrix4()
@@ -116,7 +161,13 @@ export class MoonOverlay {
     this.exposure = DEFAULT_EXPOSURE
     this.displayDistance = Math.max(1, options.displayDistance ?? DEFAULT_DISPLAY_DISTANCE)
     this.moons = []
-    this.moonQuads = []
+    this.transmittanceTextureNode = texture(new THREE.Texture())
+    this.moonStates = Array.from({ length: this.maxMoons }, () => ({
+      active: uniform(0),
+      centerRadiusDistance: uniform(new THREE.Vector4(0, 0, 0, 0)),
+      color: uniform(new THREE.Vector3(0, 0, 0)),
+      lightLocal: uniform(new THREE.Vector3(0, 0, 1)),
+    }))
 
     this.tmpMoonPositionEquatorial = new THREE.Vector3()
     this.tmpMoonPositionLocal = new THREE.Vector3()
@@ -132,20 +183,20 @@ export class MoonOverlay {
     this.tmpUp = new THREE.Vector3()
     this.tmpEdge = new THREE.Vector3()
 
-    this.sharedGeometry = new THREE.PlaneGeometry(1, 1)
+    this.sharedGeometry = new THREE.PlaneGeometry(2, 2)
+    this.colorQuad = new THREE.Mesh(
+      this.sharedGeometry,
+      createMoonColorMaterial(this.moonStates, this.transmittanceTextureNode),
+    )
+    this.colorQuad.frustumCulled = false
+    this.colorScene.add(this.colorQuad)
 
-    for (let index = 0; index < this.maxMoons; index += 1) {
-      const materialState = createMoonMaterial()
-      const quad = new THREE.Mesh(this.sharedGeometry, materialState.material)
-      quad.visible = false
-      quad.frustumCulled = false
-      this.overlayScene.add(quad)
-      this.moonQuads.push({
-        quad,
-        moonColor: materialState.moonColor,
-        lightLocal: materialState.lightLocal,
-      })
-    }
+    this.maskQuad = new THREE.Mesh(
+      this.sharedGeometry,
+      createMoonMaskMaterial(this.moonStates, this.transmittanceTextureNode),
+    )
+    this.maskQuad.frustumCulled = false
+    this.maskScene.add(this.maskQuad)
   }
 
   setMoons(moons) {
@@ -173,29 +224,21 @@ export class MoonOverlay {
     this.exposure = Math.max(0, exposure)
   }
 
-  updateMoonQuad(quadState, moon, camera, date) {
+  setTransmittanceTexture(textureValue) {
+    this.transmittanceTextureNode.value = textureValue ?? new THREE.Texture()
+  }
+
+  updateMoonState(moonState, moon, camera, date, width, height) {
     computeKeplerOrbitPosition(date, moon.orbit, this.tmpMoonPositionEquatorial)
     this.tmpMoonPositionLocal
       .copy(this.tmpMoonPositionEquatorial)
       .applyMatrix4(this.equatorialToLocal)
     this.tmpMoonPositionWorld.copy(this.planetCenter).add(this.tmpMoonPositionLocal)
 
-    if (
-      segmentIntersectsSphere(
-        camera.position,
-        this.tmpMoonPositionWorld,
-        this.planetCenter,
-        this.planetRadius,
-      )
-    ) {
-      quadState.quad.visible = false
-      return
-    }
-
     this.tmpViewVector.copy(this.tmpMoonPositionWorld).sub(camera.position)
     const distanceMeters = this.tmpViewVector.length()
     if (distanceMeters <= Math.max(1, moon.radiusM)) {
-      quadState.quad.visible = false
+      moonState.active.value = 0
       return
     }
 
@@ -205,33 +248,39 @@ export class MoonOverlay {
       .addScaledVector(this.tmpViewDirection, this.displayDistance)
     this.tmpProjectedCenter.copy(this.tmpProjectedWorld).project(camera)
 
-    if (
-      this.tmpProjectedCenter.z <= 0 ||
-      this.tmpProjectedCenter.z >= 1 ||
-      this.tmpProjectedCenter.x < -1.2 ||
-      this.tmpProjectedCenter.x > 1.2 ||
-      this.tmpProjectedCenter.y < -1.2 ||
-      this.tmpProjectedCenter.y > 1.2
-    ) {
-      quadState.quad.visible = false
+    if (this.tmpProjectedCenter.z <= 0 || this.tmpProjectedCenter.z >= 1) {
+      moonState.active.value = 0
       return
     }
 
     const angularRadiusRad = Math.asin(
       THREE.MathUtils.clamp(moon.radiusM / distanceMeters, 1e-8, 0.999999),
     )
-    const radiusNdc = projectMoonToNdcRadius(
+    const radiusPx = projectMoonToPixelRadius(
       camera,
       this.tmpViewDirection,
       this.displayDistance,
       angularRadiusRad,
-      this.tmpProjectedCenter,
+      width,
+      height,
       this.tmpRight,
       this.tmpUp,
       this.tmpEdge,
     )
-    if (!Number.isFinite(radiusNdc) || radiusNdc <= 1e-6) {
-      quadState.quad.visible = false
+    if (!Number.isFinite(radiusPx) || radiusPx <= 1e-4) {
+      moonState.active.value = 0
+      return
+    }
+
+    const centerXPx = (this.tmpProjectedCenter.x * 0.5 + 0.5) * width
+    const centerYPx = (this.tmpProjectedCenter.y * 0.5 + 0.5) * height
+    if (
+      centerXPx + radiusPx < 0 ||
+      centerXPx - radiusPx > width ||
+      centerYPx + radiusPx < 0 ||
+      centerYPx - radiusPx > height
+    ) {
+      moonState.active.value = 0
       return
     }
 
@@ -239,9 +288,9 @@ export class MoonOverlay {
       .set(moon.reflectanceColor ?? 0xffffff)
       .multiplyScalar(Math.max(0, moon.albedo ?? 0.12))
     this.tmpMoonColorVector.set(
-      this.tmpMoonColor.r * this.solarIrradiance.x * this.exposure / Math.PI,
-      this.tmpMoonColor.g * this.solarIrradiance.y * this.exposure / Math.PI,
-      this.tmpMoonColor.b * this.solarIrradiance.z * this.exposure / Math.PI,
+      (this.tmpMoonColor.r * this.solarIrradiance.x * this.exposure) / Math.PI,
+      (this.tmpMoonColor.g * this.solarIrradiance.y * this.exposure) / Math.PI,
+      (this.tmpMoonColor.b * this.solarIrradiance.z * this.exposure) / Math.PI,
     )
 
     const sunDirectionLocal = this.tmpSunDirection.copy(this.sunDirection)
@@ -249,41 +298,46 @@ export class MoonOverlay {
     const rightProjection = sunDirectionLocal.dot(this.tmpRight)
     const forwardProjection = sunDirectionLocal.dot(this.tmpViewDirection)
 
-    quadState.moonColor.value.copy(this.tmpMoonColorVector)
-    quadState.lightLocal.value.set(rightProjection, upProjection, forwardProjection)
-
-    quadState.quad.visible = true
-    quadState.quad.position.set(this.tmpProjectedCenter.x, this.tmpProjectedCenter.y, 0)
-    quadState.quad.scale.set(radiusNdc * 2, radiusNdc * 2, 1)
+    moonState.active.value = 1
+    moonState.centerRadiusDistance.value.set(centerXPx, centerYPx, radiusPx, distanceMeters)
+    moonState.color.value.copy(this.tmpMoonColorVector)
+    moonState.lightLocal.value.set(rightProjection, upProjection, forwardProjection)
   }
 
-  update(camera, date) {
+  update(camera, date, width, height) {
     camera.updateMatrixWorld(true)
     for (let index = 0; index < this.maxMoons; index += 1) {
-      const quadState = this.moonQuads[index]
+      const moonState = this.moonStates[index]
       const moon = this.moons[index]
       if (!moon) {
-        quadState.quad.visible = false
+        moonState.active.value = 0
         continue
       }
-      this.updateMoonQuad(quadState, moon, camera, date)
+      this.updateMoonState(moonState, moon, camera, date, width, height)
     }
   }
 
-  render(renderer, camera, date) {
+  renderContribution(renderer) {
     if (this.moons.length === 0) {
       return
     }
 
-    this.update(camera, date)
-    renderer.render(this.overlayScene, this.overlayCamera)
+    renderer.render(this.colorScene, this.overlayCamera)
+  }
+
+  renderMask(renderer) {
+    if (this.moons.length === 0) {
+      return
+    }
+
+    renderer.render(this.maskScene, this.overlayCamera)
   }
 
   dispose() {
-    for (const quadState of this.moonQuads) {
-      quadState.quad.material.dispose()
-      this.overlayScene.remove(quadState.quad)
-    }
+    this.colorQuad.material.dispose()
+    this.maskQuad.material.dispose()
+    this.colorScene.remove(this.colorQuad)
+    this.maskScene.remove(this.maskQuad)
     this.sharedGeometry.dispose()
   }
 }

@@ -12,7 +12,9 @@ import {
   pow,
   smoothstep,
   storage,
+  texture,
   uint,
+  uvec2,
   uniform,
   vec3,
   vec4,
@@ -97,6 +99,8 @@ export class GaiaStarOverlay {
     this.starMaxScaleU = uniform(STAR_MAX_SCALE)
     this.minMagnitudeU = uniform(0)
     this.maxMagnitudeU = uniform(1)
+    this.transmittanceTextureNode = texture(new THREE.Texture())
+    this.occlusionMaskTextureNode = texture(new THREE.Texture())
 
     this.clearAccumCompute = null
     this.splatCompute = null
@@ -126,6 +130,14 @@ export class GaiaStarOverlay {
   setPlanet(center, radius) {
     this.planetCenterU.value.copy(center)
     this.planetRadiusU.value = Math.max(0, radius)
+  }
+
+  setTransmittanceTexture(textureValue) {
+    this.transmittanceTextureNode.value = textureValue ?? new THREE.Texture()
+  }
+
+  setOcclusionMaskTexture(textureValue) {
+    this.occlusionMaskTextureNode.value = textureValue ?? new THREE.Texture()
   }
 
   async load(urls, options = {}) {
@@ -432,12 +444,17 @@ export class GaiaStarOverlay {
       const fx = uv.x.mul(this.accW.toFloat()).floor()
       const fy = uv.y.mul(this.accH.toFloat()).floor()
       const index = fy.toUint().mul(this.accW).add(fx.toUint())
+      const pixelCoord = uvec2(fx.toUint(), fy.toUint())
 
       const r = float(this.accRBuf.element(index)).mul(this.invFpScale)
       const g = float(this.accGBuf.element(index)).mul(this.invFpScale)
       const b = float(this.accBBuf.element(index)).mul(this.invFpScale)
+      const transmittance = this.transmittanceTextureNode.load(pixelCoord).rgb
+      const occlusion = float(1)
+        .sub(this.occlusionMaskTextureNode.load(pixelCoord).r.clamp(0, 1))
+        .toVar()
 
-      return vec4(vec3(r, g, b), 1)
+      return vec4(vec3(r, g, b).mul(transmittance).mul(occlusion), 1)
     })()
 
     material.depthWrite = false
