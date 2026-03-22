@@ -11,18 +11,6 @@ import { GaiaStarOverlay } from './gaiaStarOverlay.js'
 import { SkyGridOverlay } from './skyGridOverlay.js'
 
 const EARTH_ATMOSPHERE_SETTINGS = DEFAULT_ATMOSPHERE_SETTINGS
-const ALT_ATMOSPHERE_SETTINGS = {
-  ...DEFAULT_ATMOSPHERE_SETTINGS,
-  starEffectiveTemperatureK: 3200,
-  starRadiusM: 590000000,
-  planetStarDistanceM: 97500000000,
-  atmosphereHeightM: 85000,
-  rayleighScatteringMultiplier: 1.2,
-  mieScatteringMultiplier: 0.7,
-  mieExtinctionMultiplier: 0.82,
-  skyIntensity: 1.3,
-  sunDiscIntensity: 1.1,
-}
 
 const MIN_ALTITUDE_METERS = 1.7
 const MAX_ALTITUDE_METERS = 2_000_000
@@ -104,7 +92,6 @@ let lastFrameTimeMs = 0
 let lastPointerX = 0
 let lastPointerY = 0
 let isPreviewReady = false
-let atmospherePreset = 'earth'
 const atmosphereSettings = { ...EARTH_ATMOSPHERE_SETTINGS }
 let altitudeMeters = MIN_ALTITUDE_METERS
 let exposure = 1
@@ -165,7 +152,6 @@ const pane = new Pane({
   title: 'Atmosphere',
 })
 const paneState = {
-  preset: 'earth',
   sunDate: formatLocalDateInput(sunDateTime),
   sunTime: formatLocalTimeInput(sunDateTime),
   timeRateHoursPerSecond,
@@ -212,7 +198,6 @@ const updateAstronomyFrame = () => {
 }
 
 const syncPaneState = () => {
-  paneState.preset = atmospherePreset
   paneState.sunDate = formatLocalDateInput(sunDateTime)
   paneState.sunTime = formatLocalTimeInput(sunDateTime)
   paneState.timeRateHoursPerSecond = timeRateHoursPerSecond
@@ -471,28 +456,6 @@ const renderCaptureFrame = async (elapsedTime, width, height) => {
   }
 }
 
-const setAtmospherePreset = (nextPreset) => {
-  atmospherePreset = nextPreset
-  Object.assign(
-    atmosphereSettings,
-    nextPreset === 'alternate' ? ALT_ATMOSPHERE_SETTINGS : EARTH_ATMOSPHERE_SETTINGS,
-  )
-  applyVisualExposure()
-  syncPaneState()
-  void atmosphereRig
-    .prime(renderer)
-    .then(() => {
-      renderDisplayFrame()
-    })
-    .catch((error) => {
-      console.error('Failed to re-prime atmosphere preset.', error)
-    })
-}
-
-const toggleAtmospherePreset = () => {
-  setAtmospherePreset(atmospherePreset === 'alternate' ? 'earth' : 'alternate')
-}
-
 const shiftSunDateTimeMinutes = (deltaMinutes) => {
   sunDateTime = roundDateToMinute(
     new Date(sunDateTime.getTime() + deltaMinutes * 60 * 1000),
@@ -654,17 +617,6 @@ const buildControlPanel = () => {
     title: 'Scene',
     expanded: true,
   })
-  sceneFolder
-    .addBinding(paneState, 'preset', {
-      label: 'Preset',
-      options: {
-        Earth: 'earth',
-        Alternate: 'alternate',
-      },
-    })
-    .on('change', (event) => {
-      setAtmospherePreset(event.value)
-    })
   sceneFolder
     .addBinding(paneState, 'sunDate', {
       label: 'Date',
@@ -1086,12 +1038,6 @@ window.addEventListener('keydown', (event) => {
     return
   }
 
-  if (event.key === '1') {
-    event.preventDefault()
-    toggleAtmospherePreset()
-    return
-  }
-
   if (event.key === 'w' || event.key === 'W') {
     event.preventDefault()
     movementState.up = true
@@ -1222,7 +1168,6 @@ const createTestApi = () => ({
   isReady: () => isPreviewReady,
   waitUntilReady: () => previewReadyPromise,
   getState: () => ({
-    atmospherePreset,
     atmosphereSettings: { ...atmosphereSettings },
     sunState: { ...sunState },
     sunDateTimeIso: sunDateTime.toISOString(),
@@ -1294,11 +1239,6 @@ const createTestApi = () => ({
     syncPaneState()
     await waitForFrames(2)
     renderDisplayFrame()
-    return sampleCanvasStats()
-  },
-  async setPreset(nextPreset) {
-    setAtmospherePreset(nextPreset)
-    await settleAfterSettingChange()
     return sampleCanvasStats()
   },
 })
