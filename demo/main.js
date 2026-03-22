@@ -1,13 +1,19 @@
 import * as THREE from 'three'
 import { WebGPURenderer } from 'three/webgpu'
 import { Pane } from 'tweakpane'
-import { createAtmosphereRig, DEFAULT_ATMOSPHERE_SETTINGS } from 'three-tsl-atmosphere'
+import {
+  createAtmosphereRig,
+  DEFAULT_ATMOSPHERE_SETTINGS,
+  deriveSolarIrradiance,
+  sunDirectionFromAngles,
+} from 'three-tsl-atmosphere'
 import {
   makeEquatorialToLocalMatrix,
   computeSunLocalAltAz,
 } from './astronomy.js'
 import { createBlueNoiseDitherPass, loadBlueNoiseTexture } from './blueNoiseDither.js'
 import { GaiaStarOverlay } from './gaiaStarOverlay.js'
+import { MoonOverlay } from './moonOverlay.js'
 import { SkyGridOverlay } from './skyGridOverlay.js'
 
 const EARTH_ATMOSPHERE_SETTINGS = DEFAULT_ATMOSPHERE_SETTINGS
@@ -30,6 +36,7 @@ const MAX_STAR_SCALE_LIMIT = 8
 const STAR_SCALE_STEP = Math.SQRT2
 const DEFAULT_OBSERVER_LATITUDE_DEG = 37.7749
 const DEFAULT_OBSERVER_LONGITUDE_DEG = -122.4194
+const MAX_MOON_COUNT = 16
 const GAIA_CHUNK_COUNT = 60
 const GAIA_STARS_PER_CHUNK = 100_000
 const GAIA_CHUNK_URLS = Array.from({ length: GAIA_CHUNK_COUNT }, (_, index) =>
@@ -57,6 +64,26 @@ const parseLocalDateTimeInput = (dateString, timeString) => {
 
   return roundDateToMinute(parsed)
 }
+const EARTH_MOONS = [
+  {
+    id: 'moon',
+    name: 'Moon',
+    radiusM: 1_737_400,
+    albedo: 0.12,
+    reflectanceColor: 0xcfd6e6,
+    orbit: {
+      semiMajorAxisM: 384_400_000,
+      eccentricity: 0.0549,
+      inclinationDeg: 5.145,
+      longitudeOfAscendingNodeDeg: 125.08,
+      argumentOfPeriapsisDeg: 318.15,
+      meanAnomalyAtEpochDeg: 135.27,
+      orbitalPeriodSeconds: 27.321661 * 86400,
+      epochMs: Date.UTC(2000, 0, 1, 12, 0, 0, 0),
+      referencePlaneTiltDeg: 23.439281,
+    },
+  },
+]
 
 const canvas = document.querySelector('#app')
 if (!(canvas instanceof HTMLCanvasElement)) {
@@ -80,6 +107,8 @@ const zoomRotation = new THREE.Quaternion()
 const zoomedCameraQuaternion = new THREE.Quaternion()
 const planetCenter = new THREE.Vector3()
 const equatorialToLocalMatrix = new THREE.Matrix4()
+const sunDirection = new THREE.Vector3()
+const solarIrradiance = new THREE.Vector3()
 const MAX_PITCH = Math.PI * 0.48
 const MIN_FOV = 20
 const MAX_FOV = 150
@@ -145,8 +174,10 @@ const atmosphereRig = createAtmosphereRig(scene, {
   ambientIntensity: 0,
 })
 const starOverlay = new GaiaStarOverlay()
+const moonOverlay = new MoonOverlay({ maxMoons: MAX_MOON_COUNT })
 const gridOverlay = new SkyGridOverlay()
 gridOverlay.addToScene(scene)
+moonOverlay.setMoons(EARTH_MOONS)
 const pane = new Pane({
   container: controlPanelContainer,
   title: 'Atmosphere',
@@ -183,6 +214,8 @@ const applyResolvedSunAngles = () => {
   }
 
   atmosphereRig.setSunAngles(sunState.altitudeDeg, sunState.azimuthDeg)
+  sunDirectionFromAngles(sunState.altitudeDeg, sunState.azimuthDeg, sunDirection)
+  moonOverlay.setSunDirection(sunDirection)
 }
 
 const updateAstronomyFrame = () => {
@@ -194,6 +227,7 @@ const updateAstronomyFrame = () => {
   )
   gridOverlay.setEquatorialToLocal(equatorialToLocalMatrix)
   starOverlay.setEquatorialToLocal(equatorialToLocalMatrix)
+  moonOverlay.setEquatorialToLocal(equatorialToLocalMatrix)
   applyResolvedSunAngles()
 }
 
@@ -226,6 +260,9 @@ const applyVisualExposure = () => {
   starOverlay.setPlanet(planetCenter, atmosphereSettings.planetRadiusM)
   starOverlay.setExposure(exposure)
   starOverlay.setScaleRange(minStarScale, maxStarScale)
+  moonOverlay.setPlanet(planetCenter, atmosphereSettings.planetRadiusM)
+  moonOverlay.setSolarIrradiance(deriveSolarIrradiance(atmosphereSettings, solarIrradiance))
+  moonOverlay.setExposure(exposure)
 }
 
 const applyCameraOrientation = () => {
@@ -397,6 +434,7 @@ const renderAtmosphereScene = (target) => {
   if (starsEnabled) {
     starOverlay.render(renderer, camera, sunState.altitudeDeg)
   }
+  moonOverlay.render(renderer, camera, sunDateTime)
 }
 
 const setDitheringEnabled = (enabled) => {
@@ -1181,6 +1219,7 @@ const createTestApi = () => ({
     ditheringEnabled,
     minStarScale,
     maxStarScale,
+    moonCount: EARTH_MOONS.length,
     altitudeMeters,
     cameraFov: camera.fov,
     starsEnabled,

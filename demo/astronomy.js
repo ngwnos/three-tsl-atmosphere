@@ -2,6 +2,8 @@ import * as THREE from 'three'
 
 const EQUATORIAL_DIRECTION = new THREE.Vector3()
 const LOCAL_DIRECTION = new THREE.Vector3()
+const TWO_PI = Math.PI * 2
+const J2000_EPOCH_MS = Date.UTC(2000, 0, 1, 12, 0, 0, 0)
 
 const normalizeAngleDeg = (angleDeg) => {
   const wrapped = angleDeg % 360
@@ -148,4 +150,83 @@ export const computeSunLocalAltAz = (
     rightAscensionDeg,
     declinationDeg,
   }
+}
+
+const wrapAngleRad = (angleRad) => {
+  const wrapped = angleRad % TWO_PI
+  return wrapped < 0 ? wrapped + TWO_PI : wrapped
+}
+
+const solveKeplerEccentricAnomaly = (meanAnomalyRad, eccentricity) => {
+  let eccentricAnomaly = eccentricity < 0.8 ? meanAnomalyRad : Math.PI
+  for (let iteration = 0; iteration < 8; iteration += 1) {
+    const f = eccentricAnomaly - eccentricity * Math.sin(eccentricAnomaly) - meanAnomalyRad
+    const fPrime = 1 - eccentricity * Math.cos(eccentricAnomaly)
+    eccentricAnomaly -= f / Math.max(1e-8, fPrime)
+  }
+  return eccentricAnomaly
+}
+
+export const computeKeplerOrbitPosition = (
+  date,
+  orbit,
+  target = new THREE.Vector3(),
+) => {
+  const semiMajorAxisM = Math.max(1, orbit.semiMajorAxisM)
+  const eccentricity = THREE.MathUtils.clamp(orbit.eccentricity ?? 0, 0, 0.999)
+  const inclinationRad = THREE.MathUtils.degToRad(orbit.inclinationDeg ?? 0)
+  const ascendingNodeRad = THREE.MathUtils.degToRad(
+    orbit.longitudeOfAscendingNodeDeg ?? 0,
+  )
+  const argumentOfPeriapsisRad = THREE.MathUtils.degToRad(
+    orbit.argumentOfPeriapsisDeg ?? 0,
+  )
+  const meanAnomalyAtEpochRad = THREE.MathUtils.degToRad(
+    orbit.meanAnomalyAtEpochDeg ?? 0,
+  )
+  const referencePlaneTiltRad = THREE.MathUtils.degToRad(
+    orbit.referencePlaneTiltDeg ?? 0,
+  )
+  const epochMs = Number.isFinite(orbit.epochMs) ? orbit.epochMs : J2000_EPOCH_MS
+  const orbitalPeriodSeconds = Math.max(1, orbit.orbitalPeriodSeconds)
+  const elapsedSeconds = (date.getTime() - epochMs) / 1000
+  const meanMotionRadPerSecond = TWO_PI / orbitalPeriodSeconds
+  const meanAnomalyRad = wrapAngleRad(
+    meanAnomalyAtEpochRad + elapsedSeconds * meanMotionRadPerSecond,
+  )
+  const eccentricAnomalyRad = solveKeplerEccentricAnomaly(meanAnomalyRad, eccentricity)
+  const cosE = Math.cos(eccentricAnomalyRad)
+  const sinE = Math.sin(eccentricAnomalyRad)
+  const orbitalRadiusM = semiMajorAxisM * (1 - eccentricity * cosE)
+  const orbitalPlaneX = semiMajorAxisM * (cosE - eccentricity)
+  const orbitalPlaneY =
+    semiMajorAxisM * Math.sqrt(Math.max(0, 1 - eccentricity * eccentricity)) * sinE
+  const trueAnomalyRad = Math.atan2(orbitalPlaneY, orbitalPlaneX)
+  const argumentOfLatitudeRad = argumentOfPeriapsisRad + trueAnomalyRad
+
+  const cosNode = Math.cos(ascendingNodeRad)
+  const sinNode = Math.sin(ascendingNodeRad)
+  const cosInclination = Math.cos(inclinationRad)
+  const sinInclination = Math.sin(inclinationRad)
+  const cosArgument = Math.cos(argumentOfLatitudeRad)
+  const sinArgument = Math.sin(argumentOfLatitudeRad)
+
+  let xStandard =
+    orbitalRadiusM *
+    (cosNode * cosArgument - sinNode * sinArgument * cosInclination)
+  let yStandard =
+    orbitalRadiusM *
+    (sinNode * cosArgument + cosNode * sinArgument * cosInclination)
+  let zStandard = orbitalRadiusM * sinArgument * sinInclination
+
+  if (referencePlaneTiltRad !== 0) {
+    const cosTilt = Math.cos(referencePlaneTiltRad)
+    const sinTilt = Math.sin(referencePlaneTiltRad)
+    const tiltedY = yStandard * cosTilt - zStandard * sinTilt
+    const tiltedZ = yStandard * sinTilt + zStandard * cosTilt
+    yStandard = tiltedY
+    zStandard = tiltedZ
+  }
+
+  return target.set(yStandard, zStandard, xStandard)
 }
