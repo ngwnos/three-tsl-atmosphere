@@ -85,6 +85,45 @@ const EARTH_MOONS = [
     },
   },
 ]
+const DEMO_MOON_COLORS = [
+  0xd9dfe8,
+  0xe8d4bf,
+  0xcfd8c5,
+  0xc9d6e8,
+  0xe5cbb8,
+  0xd8d8d0,
+  0xc7cfe0,
+  0xe0d2c2,
+  0xd2dbc8,
+  0xe3d9cf,
+  0xc8d3df,
+  0xded0ba,
+  0xd0d7cf,
+  0xe4d7c8,
+  0xcdd6e4,
+]
+const DEMO_EXTRA_MOONS = Array.from({ length: MAX_MOON_COUNT - 1 }, (_, index) => {
+  const orbitIndex = index + 1
+  return {
+    id: `demo-moon-${orbitIndex}`,
+    name: `Demo ${orbitIndex}`,
+    radiusM: 480_000 + orbitIndex * 92_000,
+    albedo: 0.08 + (orbitIndex % 5) * 0.03,
+    reflectanceColor: DEMO_MOON_COLORS[index % DEMO_MOON_COLORS.length],
+    orbit: {
+      semiMajorAxisM: 235_000_000 + orbitIndex * 74_000_000,
+      eccentricity: 0.01 + (orbitIndex % 4) * 0.015,
+      inclinationDeg: 3 + orbitIndex * 4.5,
+      longitudeOfAscendingNodeDeg: (orbitIndex * 27) % 360,
+      argumentOfPeriapsisDeg: (orbitIndex * 41) % 360,
+      meanAnomalyAtEpochDeg: (orbitIndex * 59) % 360,
+      orbitalPeriodSeconds: (9 + orbitIndex * 5.5) * 86400,
+      epochMs: Date.UTC(2000, 0, 1, 12, 0, 0, 0),
+      referencePlaneTiltDeg: 23.439281,
+    },
+  }
+})
+const DEMO_MOONS = [...EARTH_MOONS, ...DEMO_EXTRA_MOONS]
 
 const canvas = document.querySelector('#app')
 if (!(canvas instanceof HTMLCanvasElement)) {
@@ -137,6 +176,7 @@ let maxStarScale = 2.4
 let observerLatitudeDeg = DEFAULT_OBSERVER_LATITUDE_DEG
 let observerLongitudeDeg = DEFAULT_OBSERVER_LONGITUDE_DEG
 let lookAtTarget = 'none'
+let moonDemoEnabled = false
 let sunDateTime = roundDateToMinute(new Date())
 let timeRateHoursPerSecond = 0
 let manualSunOverrideEnabled = false
@@ -185,7 +225,8 @@ const starOverlay = new GaiaStarOverlay()
 const moonOverlay = new MoonOverlay({ maxMoons: MAX_MOON_COUNT })
 const gridOverlay = new SkyGridOverlay()
 gridOverlay.addToScene(scene)
-moonOverlay.setMoons(EARTH_MOONS)
+let activeMoons = EARTH_MOONS
+moonOverlay.setMoons(activeMoons)
 const pane = new Pane({
   container: controlPanelContainer,
   title: 'Atmosphere',
@@ -205,8 +246,15 @@ const paneState = {
   altitudeKm: altitudeMeters / 1000,
   observerLatitudeDeg,
   observerLongitudeDeg,
+  moonDemoEnabled,
   showAltAzGrid: gridState.showAltAzGrid,
   showRaDecGrid: gridState.showRaDecGrid,
+}
+
+const applyMoonSet = () => {
+  activeMoons = moonDemoEnabled ? DEMO_MOONS : EARTH_MOONS
+  moonOverlay.setMoons(activeMoons)
+  updateTrackedLook()
 }
 
 const applyResolvedSunAngles = () => {
@@ -259,6 +307,7 @@ const syncPaneState = () => {
   paneState.altitudeKm = altitudeMeters / 1000
   paneState.observerLatitudeDeg = observerLatitudeDeg
   paneState.observerLongitudeDeg = observerLongitudeDeg
+  paneState.moonDemoEnabled = moonDemoEnabled
   paneState.showAltAzGrid = gridState.showAltAzGrid
   paneState.showRaDecGrid = gridState.showRaDecGrid
   pane.refresh()
@@ -309,7 +358,7 @@ const setCameraOrientationFromDirection = (direction) => {
 }
 
 const getMoonLookDirection = (target = trackedLookDirection) => {
-  const moon = EARTH_MOONS[0]
+  const moon = activeMoons[0]
   if (!moon) {
     return null
   }
@@ -878,6 +927,15 @@ const buildControlPanel = () => {
       syncPaneState()
     })
   sceneFolder
+    .addBinding(paneState, 'moonDemoEnabled', {
+      label: 'Moon demo',
+    })
+    .on('change', (event) => {
+      moonDemoEnabled = event.value
+      applyMoonSet()
+      syncPaneState()
+    })
+  sceneFolder
     .addBinding(paneState, 'manualSunOverrideEnabled', {
       label: 'Manual sun',
     })
@@ -1413,11 +1471,12 @@ const createTestApi = () => ({
     manualSunAzimuthDeg,
     observerLatitudeDeg,
     observerLongitudeDeg,
+    moonDemoEnabled,
     exposure,
     ditheringEnabled,
     minStarScale,
     maxStarScale,
-    moonCount: EARTH_MOONS.length,
+    moonCount: activeMoons.length,
     altitudeMeters,
     cameraFov: camera.fov,
     starsEnabled,
