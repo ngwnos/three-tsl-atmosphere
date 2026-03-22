@@ -2,6 +2,7 @@ import * as THREE from 'three'
 import { WebGPURenderer } from 'three/webgpu'
 import { Pane } from 'tweakpane'
 import { createAtmosphereRig, DEFAULT_ATMOSPHERE_SETTINGS } from 'three-tsl-atmosphere'
+import { createBlueNoiseDitherPass, loadBlueNoiseTexture } from './blueNoiseDither.js'
 import { GaiaStarOverlay } from './gaiaStarOverlay.js'
 import { SkyGridOverlay } from './skyGridOverlay.js'
 
@@ -84,6 +85,8 @@ let minStarScale = 0.55
 let maxStarScale = 2.4
 let observerLatitudeDeg = DEFAULT_OBSERVER_LATITUDE_DEG
 let observerLongitudeDeg = DEFAULT_OBSERVER_LONGITUDE_DEG
+let blueNoiseTexture = null
+let displayResources = null
 let captureResources = null
 const sunState = {
   altitudeDeg: 24,
@@ -205,16 +208,64 @@ const handleResize = () => {
   camera.aspect = width / Math.max(1, height)
   camera.updateProjectionMatrix()
   renderer.setSize(width, height, false)
+  disposeDisplayResources()
 }
 
 const renderDisplayFrame = () => {
-  renderer.clear()
-  gridOverlay.setCameraPosition(camera.position)
-  atmosphereRig.update(renderer, camera)
-  renderer.render(scene, camera)
-  if (starsEnabled) {
-    starOverlay.render(renderer, camera, sunState.altitudeDeg)
+  const resources = ensureDisplayResources()
+  if (!resources) {
+    return
   }
+
+  renderAtmosphereScene(resources.sceneTarget)
+  renderer.setRenderTarget(null)
+  renderer.clear()
+  renderer.render(resources.postScene, resources.postCamera)
+}
+
+const disposeDisplayResources = () => {
+  if (!displayResources) {
+    return
+  }
+
+  displayResources.dispose()
+  displayResources.sceneTarget.dispose()
+  displayResources = null
+}
+
+const ensureDisplayResources = () => {
+  const width = Math.max(1, renderer.domElement.width)
+  const height = Math.max(1, renderer.domElement.height)
+  if (
+    displayResources &&
+    displayResources.width === width &&
+    displayResources.height === height
+  ) {
+    return displayResources
+  }
+
+  disposeDisplayResources()
+
+  const sceneTarget = new THREE.RenderTarget(width, height, {
+    format: THREE.RGBAFormat,
+    type: THREE.HalfFloatType,
+    colorSpace: THREE.LinearSRGBColorSpace,
+    depthBuffer: true,
+    stencilBuffer: false,
+    samples: 0,
+  })
+  renderer.initRenderTarget(sceneTarget)
+
+  const ditherPass = createBlueNoiseDitherPass(sceneTarget.texture, width, height, blueNoiseTexture)
+
+  displayResources = {
+    width,
+    height,
+    sceneTarget,
+    ...ditherPass,
+  }
+
+  return displayResources
 }
 
 const disposeCaptureResources = () => {
@@ -222,9 +273,7 @@ const disposeCaptureResources = () => {
     return
   }
 
-  captureResources.postScene.remove(captureResources.postQuad)
-  captureResources.postQuad.geometry.dispose()
-  captureResources.postQuad.material.dispose()
+  captureResources.dispose()
   captureResources.sceneTarget.dispose()
   captureResources.outputTarget.dispose()
   captureResources.previewCanvas.remove()
@@ -246,8 +295,8 @@ const ensureCaptureResources = (width, height) => {
 
   const sceneTarget = new THREE.RenderTarget(resolvedWidth, resolvedHeight, {
     format: THREE.RGBAFormat,
-    type: THREE.UnsignedByteType,
-    colorSpace: renderer.outputColorSpace,
+    type: THREE.HalfFloatType,
+    colorSpace: THREE.LinearSRGBColorSpace,
     depthBuffer: true,
     stencilBuffer: false,
     samples: 0,
@@ -262,17 +311,12 @@ const ensureCaptureResources = (width, height) => {
   })
   renderer.initRenderTarget(sceneTarget)
   renderer.initRenderTarget(outputTarget)
-
-  const postScene = new THREE.Scene()
-  const postCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1)
-  const postQuad = new THREE.Mesh(
-    new THREE.PlaneGeometry(2, 2),
-    new THREE.MeshBasicMaterial({
-      map: sceneTarget.texture,
-      transparent: true,
-    }),
+  const ditherPass = createBlueNoiseDitherPass(
+    sceneTarget.texture,
+    resolvedWidth,
+    resolvedHeight,
+    blueNoiseTexture,
   )
-  postScene.add(postQuad)
 
   const previewCanvas = document.createElement('canvas')
   previewCanvas.width = resolvedWidth
@@ -291,12 +335,21 @@ const ensureCaptureResources = (width, height) => {
     height: resolvedHeight,
     sceneTarget,
     outputTarget,
-    postScene,
-    postCamera,
-    postQuad,
+    ...ditherPass,
     previewCanvas,
   }
   return captureResources
+}
+
+const renderAtmosphereScene = (target) => {
+  renderer.setRenderTarget(target)
+  renderer.clear()
+  gridOverlay.setCameraPosition(camera.position)
+  atmosphereRig.update(renderer, camera)
+  renderer.render(scene, camera)
+  if (starsEnabled) {
+    starOverlay.render(renderer, camera, sunState.altitudeDeg)
+  }
 }
 
 const readPackedRenderTargetRgba = async (target, width, height) => {
@@ -338,16 +391,9 @@ const renderCaptureFrame = async (elapsedTime, width, height) => {
   camera.updateProjectionMatrix()
   try {
     await atmosphereRig.prime(renderer)
-    renderer.setRenderTarget(resources.sceneTarget)
-    renderer.clear()
-    gridOverlay.setCameraPosition(camera.position)
-    atmosphereRig.update(renderer, camera)
-    renderer.render(scene, camera)
-    if (starsEnabled) {
-      starOverlay.render(renderer, camera, sunState.altitudeDeg)
-    }
-
+    renderAtmosphereScene(resources.sceneTarget)
     renderer.setRenderTarget(resources.outputTarget)
+    renderer.clear()
     renderer.render(resources.postScene, resources.postCamera)
     renderer.setRenderTarget(null)
   } finally {
@@ -1071,10 +1117,12 @@ const bootstrap = async () => {
   applyCameraOrientation()
   await renderer.init()
   handleResize()
-  await Promise.all([
+  const [, , resolvedBlueNoiseTexture] = await Promise.all([
     atmosphereRig.prime(renderer),
     starsEnabled ? starOverlay.load(GAIA_CHUNK_URLS) : Promise.resolve(),
+    loadBlueNoiseTexture('/LDR_RGBA_0.png'),
   ])
+  blueNoiseTexture = resolvedBlueNoiseTexture
   applyVisualExposure()
   renderDisplayFrame()
 
