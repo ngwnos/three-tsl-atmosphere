@@ -1,6 +1,7 @@
 import * as THREE from 'three'
 import { MeshBasicNodeMaterial } from 'three/webgpu'
 import {
+  abs,
   asin,
   atan,
   clamp,
@@ -10,9 +11,11 @@ import {
   If,
   dot,
   float,
+  floor,
   fwidth,
   fract,
   max,
+  mix,
   normalize,
   select,
   sin,
@@ -79,6 +82,61 @@ const projectMoonToPixelRadius = (
   return 0
 }
 
+const proceduralHash = (n) => sin(n).mul(43758.5453123).fract()
+
+const proceduralValueNoise3d = (p) => {
+  const i = floor(p)
+  const f = p.sub(i).fract()
+  const u = f.mul(f).mul(float(3).sub(f.mul(2)))
+  const basis = vec3(1, 57, 113)
+
+  const n000 = proceduralHash(dot(i, basis))
+  const n001 = proceduralHash(dot(i.add(vec3(0, 0, 1)), basis))
+  const n010 = proceduralHash(dot(i.add(vec3(0, 1, 0)), basis))
+  const n011 = proceduralHash(dot(i.add(vec3(0, 1, 1)), basis))
+  const n100 = proceduralHash(dot(i.add(vec3(1, 0, 0)), basis))
+  const n101 = proceduralHash(dot(i.add(vec3(1, 0, 1)), basis))
+  const n110 = proceduralHash(dot(i.add(vec3(1, 1, 0)), basis))
+  const n111 = proceduralHash(dot(i.add(vec3(1, 1, 1)), basis))
+
+  const nx00 = mix(n000, n100, u.x)
+  const nx01 = mix(n001, n101, u.x)
+  const nx10 = mix(n010, n110, u.x)
+  const nx11 = mix(n011, n111, u.x)
+  const nxy0 = mix(nx00, nx10, u.y)
+  const nxy1 = mix(nx01, nx11, u.y)
+  return mix(nxy0, nxy1, u.z).mul(2).sub(1)
+}
+
+const sampleProceduralMoonHeight = (direction, params) => {
+  const seed = params.x
+  const baseFrequency = params.y.max(float(0.5))
+  const detailFrequency = params.z.max(baseFrequency.add(float(0.5)))
+  const ridgeStrength = params.w.clamp(float(0), float(1))
+
+  const seedOffsetA = vec3(seed, seed.mul(1.31), seed.mul(1.73))
+  const seedOffsetB = vec3(seed.mul(2.11), seed.mul(2.73), seed.mul(3.19))
+  const seedOffsetC = vec3(seed.mul(4.07), seed.mul(4.73), seed.mul(5.11))
+
+  const low = proceduralValueNoise3d(direction.mul(baseFrequency).add(seedOffsetA))
+  const mid = proceduralValueNoise3d(direction.mul(baseFrequency.mul(2.1)).add(seedOffsetB))
+  const high = proceduralValueNoise3d(direction.mul(detailFrequency).add(seedOffsetC))
+  const fbm = low.mul(0.58).add(mid.mul(0.29)).add(high.mul(0.13))
+  const ridge = float(1).sub(abs(fbm))
+  const ridgeSharpened = ridge.mul(ridge)
+  const crater = abs(
+    proceduralValueNoise3d(
+      direction.mul(detailFrequency.mul(1.9)).sub(seedOffsetB),
+    ),
+  )
+  const baseHeight = fbm.mul(0.42).add(float(0.5))
+  const ruggedHeight = baseHeight
+    .add(ridgeSharpened.mul(ridgeStrength).mul(0.42))
+    .sub(crater.mul(0.18))
+
+  return clamp(ruggedHeight, float(0), float(1))
+}
+
 const createMoonSelectionNode = (
   moonStates,
   transmittanceTextureNode,
@@ -138,18 +196,22 @@ const createMoonSelectionNode = (
               ).toVar()
               const lambert = float(0).toVar()
 
-              If(moonState.surfaceRectHeightScale.w.greaterThan(float(1e-6)), () => {
+              If(moonState.surfaceScale.greaterThan(float(1e-6)), () => {
                 const longitude = atan(bodyDirection.x, bodyDirection.z)
                 const latitude = asin(clamp(bodyDirection.y, float(-1), float(1)))
                 const localUv = vec2(
                   fract(longitude.div(float(Math.PI * 2)).add(float(0.5))),
                   latitude.div(float(Math.PI)).add(float(0.5)).clamp(float(0), float(1)),
                 ).toVar()
-                const localUvStep = vec2(
+                const atlasUvStep = vec2(
                   surfaceAtlasTexelSizeNode.x
                     .div(moonState.surfaceRectHeightScale.z.max(float(1e-6))),
                   surfaceAtlasTexelSizeNode.y
                     .div(moonState.surfaceRectHeightScale.w.max(float(1e-6))),
+                ).toVar()
+                const proceduralUvStep = vec2(
+                  float(0.5).div(radiusPx.max(float(1))),
+                  float(0.5).div(radiusPx.max(float(1))),
                 ).toVar()
                 const atlasMin = vec2(
                   moonState.surfaceRectHeightScale.x,
@@ -178,14 +240,6 @@ const createMoonSelectionNode = (
                   )
                 const sampleHeight = (uvLocal) =>
                   surfaceAtlasTextureNode.sample(toAtlasUv(uvLocal)).r
-                const uvRight = vec2(
-                  fract(localUv.x.add(localUvStep.x)),
-                  localUv.y,
-                )
-                const uvUp = vec2(
-                  localUv.x,
-                  localUv.y.add(localUvStep.y).clamp(float(0), float(1)),
-                )
                 const sphericalDirection = (uvLocal) => {
                   const lon = uvLocal.x.sub(float(0.5)).mul(float(Math.PI * 2))
                   const lat = uvLocal.y.sub(float(0.5)).mul(float(Math.PI))
@@ -198,11 +252,56 @@ const createMoonSelectionNode = (
                 }
                 const displacementScale = moonState.surfaceScale.toVar()
                 const centerDirection = sphericalDirection(localUv).toVar()
-                const rightDirection = sphericalDirection(uvRight).toVar()
-                const upDirection = sphericalDirection(uvUp).toVar()
-                const centerHeight = sampleHeight(localUv).sub(float(0.5)).toVar()
-                const rightHeight = sampleHeight(uvRight).sub(float(0.5)).toVar()
-                const upHeight = sampleHeight(uvUp).sub(float(0.5)).toVar()
+                const rightDirection = vec3(0, 0, 0).toVar()
+                const upDirection = vec3(0, 0, 0).toVar()
+                const centerHeight = float(0).toVar()
+                const rightHeight = float(0).toVar()
+                const upHeight = float(0).toVar()
+
+                If(moonState.surfaceMode.greaterThan(float(1.5)), () => {
+                  const uvRight = vec2(
+                    fract(localUv.x.add(proceduralUvStep.x)),
+                    localUv.y,
+                  )
+                  const uvUp = vec2(
+                    localUv.x,
+                    localUv.y.add(proceduralUvStep.y).clamp(float(0), float(1)),
+                  )
+                  rightDirection.assign(sphericalDirection(uvRight))
+                  upDirection.assign(sphericalDirection(uvUp))
+                  centerHeight.assign(
+                    sampleProceduralMoonHeight(
+                      centerDirection,
+                      moonState.surfaceProceduralParams,
+                    ).sub(float(0.5)),
+                  )
+                  rightHeight.assign(
+                    sampleProceduralMoonHeight(
+                      rightDirection,
+                      moonState.surfaceProceduralParams,
+                    ).sub(float(0.5)),
+                  )
+                  upHeight.assign(
+                    sampleProceduralMoonHeight(
+                      upDirection,
+                      moonState.surfaceProceduralParams,
+                    ).sub(float(0.5)),
+                  )
+                }).Else(() => {
+                  const uvRight = vec2(
+                    fract(localUv.x.add(atlasUvStep.x)),
+                    localUv.y,
+                  )
+                  const uvUp = vec2(
+                    localUv.x,
+                    localUv.y.add(atlasUvStep.y).clamp(float(0), float(1)),
+                  )
+                  rightDirection.assign(sphericalDirection(uvRight))
+                  upDirection.assign(sphericalDirection(uvUp))
+                  centerHeight.assign(sampleHeight(localUv).sub(float(0.5)))
+                  rightHeight.assign(sampleHeight(uvRight).sub(float(0.5)))
+                  upHeight.assign(sampleHeight(uvUp).sub(float(0.5)))
+                })
                 const centerPosition = centerDirection
                   .mul(float(1).add(centerHeight.mul(displacementScale)))
                   .toVar()
@@ -315,7 +414,9 @@ export class MoonOverlay {
       bodyRightLocal: uniform(new THREE.Vector3(1, 0, 0)),
       bodyUpLocal: uniform(new THREE.Vector3(0, 1, 0)),
       bodyForwardLocal: uniform(new THREE.Vector3(0, 0, 1)),
+      surfaceMode: uniform(0),
       surfaceRectHeightScale: uniform(new THREE.Vector4(0, 0, 0, 0)),
+      surfaceProceduralParams: uniform(new THREE.Vector4(0, 0, 0, 0)),
       surfaceScale: uniform(0),
     }))
 
@@ -551,18 +652,34 @@ export class MoonOverlay {
       this.tmpBodyForwardLocal.dot(this.tmpMoonToCamera),
     )
     const atlasRect = moon.surface?.atlasRect
-    if (atlasRect && moon.surface?.heightScaleM) {
+    if (moon.surface?.procedural && moon.surface?.heightScaleM) {
+      moonState.surfaceMode.value = 2
+      moonState.surfaceRectHeightScale.value.set(0, 0, 0, 0)
+      moonState.surfaceProceduralParams.value.set(
+        moon.surface.procedural.seed ?? 0,
+        moon.surface.procedural.baseFrequency ?? 5.5,
+        moon.surface.procedural.detailFrequency ?? 18,
+        moon.surface.procedural.ridgeStrength ?? 0.65,
+      )
+      moonState.surfaceScale.value =
+        (Math.max(0, moon.surface.heightScaleM) * this.heightScaleMultiplier) /
+        Math.max(1, moon.radiusM)
+    } else if (atlasRect && moon.surface?.heightScaleM) {
+      moonState.surfaceMode.value = 1
       moonState.surfaceRectHeightScale.value.set(
         atlasRect.x,
         atlasRect.y,
         atlasRect.width,
         atlasRect.height,
       )
+      moonState.surfaceProceduralParams.value.set(0, 0, 0, 0)
       moonState.surfaceScale.value =
         (Math.max(0, moon.surface.heightScaleM) * this.heightScaleMultiplier) /
         Math.max(1, moon.radiusM)
     } else {
+      moonState.surfaceMode.value = 0
       moonState.surfaceRectHeightScale.value.set(0, 0, 0, 0)
+      moonState.surfaceProceduralParams.value.set(0, 0, 0, 0)
       moonState.surfaceScale.value = 0
     }
   }

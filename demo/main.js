@@ -15,7 +15,6 @@ import {
 import { createBlueNoiseDitherPass, loadBlueNoiseTexture } from './blueNoiseDither.js'
 import { GaiaStarOverlay } from './gaiaStarOverlay.js'
 import { MoonOverlay } from './moonOverlay.js'
-import { createGeneratedMoonHeightAtlas } from './moonHeightAtlas.js'
 import { SkyGridOverlay } from './skyGridOverlay.js'
 
 const EARTH_ATMOSPHERE_SETTINGS = DEFAULT_ATMOSPHERE_SETTINGS
@@ -45,12 +44,6 @@ const DEFAULT_OBSERVER_LONGITUDE_DEG = -122.4194
 const MAX_MOON_COUNT = 16
 const DEFAULT_GAIA_CHUNK_COUNT = 1
 const MAX_GAIA_CHUNK_COUNT = 60
-const PRIMARY_MOON_HEIGHT_ATLAS_ID = 'primary-moon-test'
-const MOON_HEIGHT_ATLAS = createGeneratedMoonHeightAtlas([
-  {
-    id: PRIMARY_MOON_HEIGHT_ATLAS_ID,
-  },
-])
 const GAIA_STARS_PER_CHUNK = 100_000
 const buildGaiaChunkUrls = (chunkCount) =>
   Array.from({ length: chunkCount }, (_, index) =>
@@ -124,9 +117,13 @@ const EARTH_MOONS = [
     spinRateDegPerDay: 360 / 27.321661,
     spinPhaseDegAtEpoch: 0,
     surface: {
-      atlasId: PRIMARY_MOON_HEIGHT_ATLAS_ID,
-      atlasRect: MOON_HEIGHT_ATLAS.rects.get(PRIMARY_MOON_HEIGHT_ATLAS_ID) ?? null,
       heightScaleM: 14_000,
+      procedural: {
+        seed: 11.7,
+        baseFrequency: 6.5,
+        detailFrequency: 26,
+        ridgeStrength: 0.72,
+      },
     },
     orbit: {
       semiMajorAxisM: 384_400_000,
@@ -288,7 +285,6 @@ const atmosphereRig = createAtmosphereRig(scene, {
 })
 const starOverlay = new GaiaStarOverlay()
 const moonOverlay = new MoonOverlay({ maxMoons: MAX_MOON_COUNT })
-moonOverlay.setSurfaceAtlas(MOON_HEIGHT_ATLAS.texture, MOON_HEIGHT_ATLAS.texelSize)
 const gridOverlay = new SkyGridOverlay()
 gridOverlay.addToScene(scene)
 let activeMoons = EARTH_MOONS
