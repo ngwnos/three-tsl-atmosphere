@@ -110,6 +110,7 @@ export class GaiaStarOverlay {
     this.compositeQuad = null
 
     this.tmpViewProj = new THREE.Matrix4()
+    this.tmpViewRotationOnly = new THREE.Matrix4()
   }
 
   setExposure(exposure) {
@@ -322,8 +323,10 @@ export class GaiaStarOverlay {
         Return()
       })
 
-      const positionWorld = this.cameraPositionU.add(direction.mul(this.starDistanceU))
-      const clip = this.viewProjU.mul(vec4(positionWorld, 1))
+      // Stars are rendered as an infinite sky sphere: camera translation must not
+      // affect their projection, only camera rotation.
+      const positionView = direction.mul(this.starDistanceU)
+      const clip = this.viewProjU.mul(vec4(positionView, 1))
 
       If(clip.w.lessThanEqual(0), () => {
         Return()
@@ -488,7 +491,9 @@ export class GaiaStarOverlay {
 
   update(camera, sunAltitudeDeg) {
     camera.updateMatrixWorld(true)
-    this.tmpViewProj.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse)
+    this.tmpViewRotationOnly.copy(camera.matrixWorldInverse)
+    this.tmpViewRotationOnly.setPosition(0, 0, 0)
+    this.tmpViewProj.multiplyMatrices(camera.projectionMatrix, this.tmpViewRotationOnly)
     this.viewProjU.value.copy(this.tmpViewProj)
     this.cameraPositionU.value.copy(camera.position)
     this.fovBoostU.value = computeFovBoost(camera.fov)
