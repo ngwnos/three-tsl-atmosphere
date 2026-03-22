@@ -6,6 +6,7 @@ export type AtmosphereVisualSettings = {
   skyTintR: number
   skyTintG: number
   skyTintB: number
+  groundOpacity: number
   sunDiscIntensity: number
   sunDiscColorR: number
   sunDiscColorG: number

@@ -1067,6 +1067,12 @@ const buildControlPanel = () => {
     max: 2,
     step: 0.01,
   })
+  bindAtmosphereSetting(visualFolder, 'groundOpacity', {
+    label: 'Ground op',
+    min: 0,
+    max: 1,
+    step: 0.01,
+  })
   bindAtmosphereSetting(visualFolder, 'sunDiscIntensity', {
     label: 'Sun int',
     min: 0,
