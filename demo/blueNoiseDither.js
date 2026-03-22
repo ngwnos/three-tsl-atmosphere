@@ -1,6 +1,6 @@
 import * as THREE from 'three'
 import { MeshBasicNodeMaterial } from 'three/webgpu'
-import { screenUV, texture, uniform, uv, vec3 } from 'three/tsl'
+import { screenUV, texture, uniform, vec2, vec3 } from 'three/tsl'
 
 const BLUE_NOISE_TILE_SIZE = 128
 const DITHER_STRENGTH = 1 / 255
@@ -26,7 +26,7 @@ export const createBlueNoiseDitherPass = (sourceTexture, width, height, blueNois
   )
 
   const material = new MeshBasicNodeMaterial()
-  const sourceSample = texture(sourceTexture, uv())
+  const sourceSample = texture(sourceTexture, vec2(screenUV.x, screenUV.y))
   const blueNoiseSample = blueNoiseTexture
     ? texture(blueNoiseTexture, screenUV.mul(noiseScale)).rgb.sub(vec3(0.5)).mul(DITHER_STRENGTH)
     : vec3(0)
