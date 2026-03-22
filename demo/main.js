@@ -51,6 +51,11 @@ const roundDateToMinute = (date) => {
   rounded.setSeconds(0, 0)
   return rounded
 }
+const createDefaultSunDateTime = () => {
+  const defaultDateTime = roundDateToMinute(new Date())
+  defaultDateTime.setHours(13, 0, 0, 0)
+  return defaultDateTime
+}
 const formatLocalDateInput = (date) =>
   `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`
 const formatLocalTimeInput = (date) =>
@@ -180,7 +185,7 @@ let observerLatitudeDeg = DEFAULT_OBSERVER_LATITUDE_DEG
 let observerLongitudeDeg = DEFAULT_OBSERVER_LONGITUDE_DEG
 let lookAtTarget = 'none'
 let moonDemoEnabled = false
-let sunDateTime = roundDateToMinute(new Date())
+let sunDateTime = createDefaultSunDateTime()
 let timeRateHoursPerSecond = 0
 let manualSunOverrideEnabled = false
 let manualSunAltitudeDeg = 24
