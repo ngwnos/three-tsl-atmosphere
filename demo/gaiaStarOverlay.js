@@ -145,7 +145,19 @@ export class GaiaStarOverlay {
     const expectedStarCount = Number.isFinite(options.expectedStarCount)
       ? Math.max(0, Math.floor(options.expectedStarCount))
       : 0
+    const onProgress =
+      typeof options.onProgress === 'function' ? options.onProgress : null
+    const reportProgress = (loadedChunks, loadedStars, phase = 'loading') => {
+      onProgress?.({
+        phase,
+        loadedChunks,
+        totalChunks: urlList.length,
+        loadedStars,
+        totalStars: expectedStarCount,
+      })
+    }
     let starCount = expectedStarCount
+    reportProgress(0, 0, 'loading')
     if (starCount === 0) {
       for (const url of urlList) {
         const response = await fetch(url)
@@ -169,7 +181,8 @@ export class GaiaStarOverlay {
     let maxMagnitude = Number.NEGATIVE_INFINITY
 
     let starIndex = 0
-    for (const url of urlList) {
+    for (let urlIndex = 0; urlIndex < urlList.length; urlIndex += 1) {
+      const url = urlList[urlIndex]
       const response = await fetch(url)
       if (!response.ok) {
         throw new Error(`Failed to load Gaia chunk: ${response.status} ${response.statusText}`)
@@ -214,6 +227,8 @@ export class GaiaStarOverlay {
         maxMagnitude = Math.max(maxMagnitude, magnitude)
         starIndex += 1
       }
+
+      reportProgress(urlIndex + 1, starIndex, 'loading')
     }
 
     this.starCount = starIndex
@@ -233,6 +248,7 @@ export class GaiaStarOverlay {
     this.directionSBA.needsUpdate = true
     this.colorSBA.needsUpdate = true
     this.magnitudeSBA.needsUpdate = true
+    reportProgress(urlList.length, this.starCount, 'ready')
   }
 
   ensureAccumulator(width, height) {

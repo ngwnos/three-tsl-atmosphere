@@ -62,6 +62,29 @@ const resolveGaiaChunkCount = (value) => {
 
   return THREE.MathUtils.clamp(parsed, 1, MAX_GAIA_CHUNK_COUNT)
 }
+const formatInteger = (value) => new Intl.NumberFormat('en-US').format(Math.max(0, Math.floor(value)))
+const formatStarLoadStatus = ({
+  enabled,
+  phase,
+  loadedChunks,
+  totalChunks,
+  loadedStars,
+}) => {
+  if (!enabled) {
+    return 'Off'
+  }
+
+  const chunkLabel = `${loadedChunks}/${Math.max(1, totalChunks)}`
+  if (phase === 'ready') {
+    return `${chunkLabel} chunks, ${formatInteger(loadedStars)} stars`
+  }
+
+  if (phase === 'failed') {
+    return `Failed at ${chunkLabel}`
+  }
+
+  return `Loading ${chunkLabel}`
+}
 const pad2 = (value) => String(value).padStart(2, '0')
 const roundDateToMinute = (date) => {
   const rounded = new Date(date)
@@ -170,6 +193,9 @@ const urlParams = new URLSearchParams(window.location.search)
 const starsEnabled = urlParams.get('stars') !== 'off'
 const gaiaChunkCount = resolveGaiaChunkCount(urlParams.get('chunks'))
 const gaiaChunkUrls = buildGaiaChunkUrls(gaiaChunkCount)
+let starLoadPhase = starsEnabled ? 'queued' : 'off'
+let starLoadedChunks = 0
+let starLoadedStars = 0
 
 const scene = new THREE.Scene()
 const ZERO_VECTOR = new THREE.Vector3(0, 0, 0)
@@ -287,6 +313,24 @@ const paneState = {
   moonDemoEnabled,
   showAltAzGrid: gridState.showAltAzGrid,
   showRaDecGrid: gridState.showRaDecGrid,
+  starLoadStatus: formatStarLoadStatus({
+    enabled: starsEnabled,
+    phase: starLoadPhase,
+    loadedChunks: starLoadedChunks,
+    totalChunks: gaiaChunkCount,
+    loadedStars: starLoadedStars,
+  }),
+}
+
+const updateStarLoadProgress = ({
+  phase = 'loading',
+  loadedChunks = 0,
+  loadedStars = 0,
+} = {}) => {
+  starLoadPhase = phase
+  starLoadedChunks = loadedChunks
+  starLoadedStars = loadedStars
+  syncPaneState()
 }
 
 const applyMoonSet = () => {
@@ -349,6 +393,13 @@ const syncPaneState = () => {
   paneState.moonDemoEnabled = moonDemoEnabled
   paneState.showAltAzGrid = gridState.showAltAzGrid
   paneState.showRaDecGrid = gridState.showRaDecGrid
+  paneState.starLoadStatus = formatStarLoadStatus({
+    enabled: starsEnabled,
+    phase: starLoadPhase,
+    loadedChunks: starLoadedChunks,
+    totalChunks: gaiaChunkCount,
+    loadedStars: starLoadedStars,
+  })
   pane.refresh()
 }
 
@@ -1232,6 +1283,11 @@ const buildControlPanel = () => {
     expanded: true,
   })
   starsFolder
+    .addBinding(paneState, 'starLoadStatus', {
+      label: 'Load',
+      readonly: true,
+    })
+  starsFolder
     .addBinding(paneState, 'showAltAzGrid', {
       label: 'Alt/Az grid',
     })
@@ -1614,8 +1670,9 @@ const bootstrap = async () => {
     starsEnabled
       ? starOverlay.load(gaiaChunkUrls, {
           expectedStarCount: gaiaChunkCount * GAIA_STARS_PER_CHUNK,
+          onProgress: updateStarLoadProgress,
         })
-      : Promise.resolve(),
+      : Promise.resolve(updateStarLoadProgress({ phase: 'off' })),
     loadBlueNoiseTexture('/LDR_RGBA_0.png'),
   ])
   blueNoiseTexture = resolvedBlueNoiseTexture
