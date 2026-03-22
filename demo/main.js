@@ -36,7 +36,9 @@ const STAR_SCALE_STEP = Math.SQRT2
 const DEFAULT_OBSERVER_LATITUDE_DEG = 37.7749
 const DEFAULT_OBSERVER_LONGITUDE_DEG = -122.4194
 const GREENWICH_SIDEREAL_ANGLE_DEG = 25
-const GAIA_CHUNK_URLS = Array.from({ length: 5 }, (_, index) =>
+const GAIA_CHUNK_COUNT = 60
+const GAIA_STARS_PER_CHUNK = 100_000
+const GAIA_CHUNK_URLS = Array.from({ length: GAIA_CHUNK_COUNT }, (_, index) =>
   `/data/gaia/chunk_${String(index).padStart(4, '0')}.bin`,
 )
 
@@ -1139,7 +1141,11 @@ const bootstrap = async () => {
   handleResize()
   const [, , resolvedBlueNoiseTexture] = await Promise.all([
     atmosphereRig.prime(renderer),
-    starsEnabled ? starOverlay.load(GAIA_CHUNK_URLS) : Promise.resolve(),
+    starsEnabled
+      ? starOverlay.load(GAIA_CHUNK_URLS, {
+          expectedStarCount: GAIA_CHUNK_COUNT * GAIA_STARS_PER_CHUNK,
+        })
+      : Promise.resolve(),
     loadBlueNoiseTexture('/LDR_RGBA_0.png'),
   ])
   blueNoiseTexture = resolvedBlueNoiseTexture

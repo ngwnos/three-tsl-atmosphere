@@ -128,10 +128,14 @@ export class GaiaStarOverlay {
     this.planetRadiusU.value = Math.max(0, radius)
   }
 
-  async load(urls) {
+  async load(urls, options = {}) {
     const urlList = Array.isArray(urls) ? urls : [urls]
-    const chunkArrays = await Promise.all(
-      urlList.map(async (url) => {
+    const expectedStarCount = Number.isFinite(options.expectedStarCount)
+      ? Math.max(0, Math.floor(options.expectedStarCount))
+      : 0
+    let starCount = expectedStarCount
+    if (starCount === 0) {
+      for (const url of urlList) {
         const response = await fetch(url)
         if (!response.ok) {
           throw new Error(`Failed to load Gaia chunk: ${response.status} ${response.statusText}`)
@@ -142,14 +146,10 @@ export class GaiaStarOverlay {
           throw new Error(`Unexpected Gaia chunk size for ${url}.`)
         }
 
-        return starData
-      }),
-    )
+        starCount += starData.length / FLOATS_PER_STAR
+      }
+    }
 
-    const starCount = chunkArrays.reduce(
-      (total, starData) => total + starData.length / FLOATS_PER_STAR,
-      0,
-    )
     const directions = new Float32Array(starCount * 4)
     const colors = new Float32Array(starCount * 4)
     const magnitudes = new Float32Array(starCount)
@@ -157,8 +157,21 @@ export class GaiaStarOverlay {
     let maxMagnitude = Number.NEGATIVE_INFINITY
 
     let starIndex = 0
-    for (const starData of chunkArrays) {
+    for (const url of urlList) {
+      const response = await fetch(url)
+      if (!response.ok) {
+        throw new Error(`Failed to load Gaia chunk: ${response.status} ${response.statusText}`)
+      }
+
+      const starData = new Float32Array(await response.arrayBuffer())
+      if (starData.length % FLOATS_PER_STAR !== 0) {
+        throw new Error(`Unexpected Gaia chunk size for ${url}.`)
+      }
+
       const chunkStarCount = starData.length / FLOATS_PER_STAR
+      if (starIndex + chunkStarCount > magnitudes.length) {
+        throw new Error('Gaia star allocation was smaller than the loaded dataset.')
+      }
 
       for (let chunkIndex = 0; chunkIndex < chunkStarCount; chunkIndex += 1) {
         const offset = chunkIndex * FLOATS_PER_STAR
@@ -191,7 +204,7 @@ export class GaiaStarOverlay {
       }
     }
 
-    this.starCount = starCount
+    this.starCount = starIndex
     this.directionSBA = new StorageBufferAttribute(directions, 4)
     this.colorSBA = new StorageBufferAttribute(colors, 4)
     this.magnitudeSBA = new StorageBufferAttribute(magnitudes, 1)
