@@ -15,6 +15,7 @@ import {
 import { createBlueNoiseDitherPass, loadBlueNoiseTexture } from './blueNoiseDither.js'
 import { GaiaStarOverlay } from './gaiaStarOverlay.js'
 import { MoonOverlay } from './moonOverlay.js'
+import { createGeneratedMoonHeightAtlas } from './moonHeightAtlas.js'
 import { SkyGridOverlay } from './skyGridOverlay.js'
 
 const EARTH_ATMOSPHERE_SETTINGS = DEFAULT_ATMOSPHERE_SETTINGS
@@ -40,6 +41,12 @@ const MAX_MOON_SIZE_SCALE = 10
 const DEFAULT_OBSERVER_LATITUDE_DEG = 37.7749
 const DEFAULT_OBSERVER_LONGITUDE_DEG = -122.4194
 const MAX_MOON_COUNT = 16
+const PRIMARY_MOON_HEIGHT_ATLAS_ID = 'primary-moon-test'
+const MOON_HEIGHT_ATLAS = createGeneratedMoonHeightAtlas([
+  {
+    id: PRIMARY_MOON_HEIGHT_ATLAS_ID,
+  },
+])
 const GAIA_CHUNK_COUNT = 60
 const GAIA_STARS_PER_CHUNK = 100_000
 const GAIA_CHUNK_URLS = Array.from({ length: GAIA_CHUNK_COUNT }, (_, index) =>
@@ -79,6 +86,13 @@ const EARTH_MOONS = [
     radiusM: 1_737_400,
     albedo: 0.12,
     reflectanceColor: 0xcfd6e6,
+    spinRateDegPerDay: 360 / 27.321661,
+    spinPhaseDegAtEpoch: 0,
+    surface: {
+      atlasId: PRIMARY_MOON_HEIGHT_ATLAS_ID,
+      atlasRect: MOON_HEIGHT_ATLAS.rects.get(PRIMARY_MOON_HEIGHT_ATLAS_ID) ?? null,
+      heightScaleM: 14_000,
+    },
     orbit: {
       semiMajorAxisM: 384_400_000,
       eccentricity: 0.0549,
@@ -117,6 +131,8 @@ const DEMO_EXTRA_MOONS = Array.from({ length: MAX_MOON_COUNT - 1 }, (_, index) =
     radiusM: 480_000 + orbitIndex * 92_000,
     albedo: 0.08 + (orbitIndex % 5) * 0.03,
     reflectanceColor: DEMO_MOON_COLORS[index % DEMO_MOON_COLORS.length],
+    spinRateDegPerDay: 8 + orbitIndex * 3.5,
+    spinPhaseDegAtEpoch: (orbitIndex * 23) % 360,
     orbit: {
       semiMajorAxisM: 235_000_000 + orbitIndex * 74_000_000,
       eccentricity: 0.01 + (orbitIndex % 4) * 0.015,
@@ -231,6 +247,7 @@ const atmosphereRig = createAtmosphereRig(scene, {
 })
 const starOverlay = new GaiaStarOverlay()
 const moonOverlay = new MoonOverlay({ maxMoons: MAX_MOON_COUNT })
+moonOverlay.setSurfaceAtlas(MOON_HEIGHT_ATLAS.texture, MOON_HEIGHT_ATLAS.texelSize)
 const gridOverlay = new SkyGridOverlay()
 gridOverlay.addToScene(scene)
 let activeMoons = EARTH_MOONS

@@ -1,13 +1,21 @@
 import * as THREE from 'three'
 import { MeshBasicNodeMaterial } from 'three/webgpu'
 import {
+  asin,
+  atan,
+  clamp,
+  cos,
+  cross,
   Fn,
   If,
   dot,
   float,
   fwidth,
+  fract,
   max,
   normalize,
+  select,
+  sin,
   smoothstep,
   sqrt,
   texture,
@@ -25,6 +33,7 @@ const DEFAULT_MAX_MOONS = 16
 const DEFAULT_EXPOSURE = 1
 const DEFAULT_DISPLAY_DISTANCE = 90
 const MOON_VISIBILITY_EPSILON = 1e-5
+const BODY_AXIS_EPSILON = 1e-6
 
 const buildMoonViewBasis = (
   camera,
@@ -70,7 +79,12 @@ const projectMoonToPixelRadius = (
   return 0
 }
 
-const createMoonSelectionNode = (moonStates, transmittanceTextureNode) =>
+const createMoonSelectionNode = (
+  moonStates,
+  transmittanceTextureNode,
+  surfaceAtlasTextureNode,
+  surfaceAtlasTexelSizeNode,
+) =>
   Fn(() => {
     const pixelCoord = viewportCoordinate.toVar()
     const pixelCoordU = uvec2(pixelCoord).toVar()
@@ -108,10 +122,110 @@ const createMoonSelectionNode = (moonStates, transmittanceTextureNode) =>
             If(moonState.centerRadiusDistance.w.lessThan(bestDistance), () => {
               const normalZ = sqrt(float(1).sub(discRadiusSquared).max(float(0))).toVar()
               const normalLocal = vec3(discUv.x, discUv.y, normalZ).toVar()
-              const lambert = max(
-                dot(normalLocal, normalize(moonState.lightLocal)),
-                float(0),
+              const bodyDirection = normalize(
+                vec3(
+                  dot(normalLocal, moonState.bodyRightLocal),
+                  dot(normalLocal, moonState.bodyUpLocal),
+                  dot(normalLocal, moonState.bodyForwardLocal),
+                ),
               ).toVar()
+              const lightBody = normalize(
+                vec3(
+                  dot(moonState.lightLocal, moonState.bodyRightLocal),
+                  dot(moonState.lightLocal, moonState.bodyUpLocal),
+                  dot(moonState.lightLocal, moonState.bodyForwardLocal),
+                ),
+              ).toVar()
+              const lambert = float(0).toVar()
+
+              If(moonState.surfaceRectHeightScale.w.greaterThan(float(1e-6)), () => {
+                const longitude = atan(bodyDirection.x, bodyDirection.z)
+                const latitude = asin(clamp(bodyDirection.y, float(-1), float(1)))
+                const localUv = vec2(
+                  fract(longitude.div(float(Math.PI * 2)).add(float(0.5))),
+                  latitude.div(float(Math.PI)).add(float(0.5)).clamp(float(0), float(1)),
+                ).toVar()
+                const localUvStep = vec2(
+                  surfaceAtlasTexelSizeNode.x
+                    .div(moonState.surfaceRectHeightScale.z.max(float(1e-6))),
+                  surfaceAtlasTexelSizeNode.y
+                    .div(moonState.surfaceRectHeightScale.w.max(float(1e-6))),
+                ).toVar()
+                const atlasMin = vec2(
+                  moonState.surfaceRectHeightScale.x,
+                  moonState.surfaceRectHeightScale.y,
+                ).add(surfaceAtlasTexelSizeNode.mul(float(0.5))).toVar()
+                const atlasMax = vec2(
+                  moonState.surfaceRectHeightScale.x.add(
+                    moonState.surfaceRectHeightScale.z,
+                  ),
+                  moonState.surfaceRectHeightScale.y.add(
+                    moonState.surfaceRectHeightScale.w,
+                  ),
+                ).sub(surfaceAtlasTexelSizeNode.mul(float(0.5))).toVar()
+                const toAtlasUv = (uvLocal) =>
+                  clamp(
+                    vec2(
+                      moonState.surfaceRectHeightScale.x.add(
+                        uvLocal.x.mul(moonState.surfaceRectHeightScale.z),
+                      ),
+                      moonState.surfaceRectHeightScale.y.add(
+                        uvLocal.y.mul(moonState.surfaceRectHeightScale.w),
+                      ),
+                    ),
+                    atlasMin,
+                    atlasMax,
+                  )
+                const sampleHeight = (uvLocal) =>
+                  surfaceAtlasTextureNode.sample(toAtlasUv(uvLocal)).r
+                const uvRight = vec2(
+                  fract(localUv.x.add(localUvStep.x)),
+                  localUv.y,
+                )
+                const uvUp = vec2(
+                  localUv.x,
+                  localUv.y.add(localUvStep.y).clamp(float(0), float(1)),
+                )
+                const sphericalDirection = (uvLocal) => {
+                  const lon = uvLocal.x.sub(float(0.5)).mul(float(Math.PI * 2))
+                  const lat = uvLocal.y.sub(float(0.5)).mul(float(Math.PI))
+                  const cosLat = cos(lat)
+                  return vec3(
+                    sin(lon).mul(cosLat),
+                    sin(lat),
+                    cos(lon).mul(cosLat),
+                  )
+                }
+                const displacementScale = moonState.surfaceScale.toVar()
+                const centerDirection = sphericalDirection(localUv).toVar()
+                const rightDirection = sphericalDirection(uvRight).toVar()
+                const upDirection = sphericalDirection(uvUp).toVar()
+                const centerHeight = sampleHeight(localUv).sub(float(0.5)).toVar()
+                const rightHeight = sampleHeight(uvRight).sub(float(0.5)).toVar()
+                const upHeight = sampleHeight(uvUp).sub(float(0.5)).toVar()
+                const centerPosition = centerDirection
+                  .mul(float(1).add(centerHeight.mul(displacementScale)))
+                  .toVar()
+                const rightPosition = rightDirection
+                  .mul(float(1).add(rightHeight.mul(displacementScale)))
+                  .toVar()
+                const upPosition = upDirection
+                  .mul(float(1).add(upHeight.mul(displacementScale)))
+                  .toVar()
+                const perturbedBodyNormal = normalize(
+                  select(
+                    dot(
+                      normalize(cross(rightPosition.sub(centerPosition), upPosition.sub(centerPosition))),
+                      centerDirection,
+                    ).lessThan(float(0)),
+                    normalize(cross(upPosition.sub(centerPosition), rightPosition.sub(centerPosition))),
+                    normalize(cross(rightPosition.sub(centerPosition), upPosition.sub(centerPosition))),
+                  ),
+                ).toVar()
+                lambert.assign(max(dot(perturbedBodyNormal, lightBody), float(0)))
+              }).Else(() => {
+                lambert.assign(max(dot(normalLocal, normalize(moonState.lightLocal)), float(0)))
+              })
 
               bestDistance.assign(moonState.centerRadiusDistance.w)
               bestContribution.assign(moonState.color.mul(lambert).mul(discMask))
@@ -125,9 +239,19 @@ const createMoonSelectionNode = (moonStates, transmittanceTextureNode) =>
     return vec4(bestContribution.mul(transmittance), bestMask)
   })()
 
-const createMoonColorMaterial = (moonStates, transmittanceTextureNode) => {
+const createMoonColorMaterialWithSurface = (
+  moonStates,
+  transmittanceTextureNode,
+  surfaceAtlasTextureNode,
+  surfaceAtlasTexelSizeNode,
+) => {
   const material = new MeshBasicNodeMaterial()
-  const moonSelection = createMoonSelectionNode(moonStates, transmittanceTextureNode)
+  const moonSelection = createMoonSelectionNode(
+    moonStates,
+    transmittanceTextureNode,
+    surfaceAtlasTextureNode,
+    surfaceAtlasTexelSizeNode,
+  )
   material.outputNode = Fn(() => {
     const moon = moonSelection.toVar()
     return vec4(moon.rgb, float(1))
@@ -140,9 +264,19 @@ const createMoonColorMaterial = (moonStates, transmittanceTextureNode) => {
   return material
 }
 
-const createMoonMaskMaterial = (moonStates, transmittanceTextureNode) => {
+const createMoonMaskMaterial = (
+  moonStates,
+  transmittanceTextureNode,
+  surfaceAtlasTextureNode,
+  surfaceAtlasTexelSizeNode,
+) => {
   const material = new MeshBasicNodeMaterial()
-  const moonSelection = createMoonSelectionNode(moonStates, transmittanceTextureNode)
+  const moonSelection = createMoonSelectionNode(
+    moonStates,
+    transmittanceTextureNode,
+    surfaceAtlasTextureNode,
+    surfaceAtlasTexelSizeNode,
+  )
   material.outputNode = Fn(() => {
     const moon = moonSelection.toVar()
     return vec4(vec3(moon.a), float(1))
@@ -170,11 +304,18 @@ export class MoonOverlay {
     this.displayDistance = Math.max(1, options.displayDistance ?? DEFAULT_DISPLAY_DISTANCE)
     this.moons = []
     this.transmittanceTextureNode = texture(new THREE.Texture())
+    this.surfaceAtlasTextureNode = texture(new THREE.Texture())
+    this.surfaceAtlasTexelSize = uniform(new THREE.Vector2(1, 1))
     this.moonStates = Array.from({ length: this.maxMoons }, () => ({
       active: uniform(0),
       centerRadiusDistance: uniform(new THREE.Vector4(0, 0, 0, 0)),
       color: uniform(new THREE.Vector3(0, 0, 0)),
       lightLocal: uniform(new THREE.Vector3(0, 0, 1)),
+      bodyRightLocal: uniform(new THREE.Vector3(1, 0, 0)),
+      bodyUpLocal: uniform(new THREE.Vector3(0, 1, 0)),
+      bodyForwardLocal: uniform(new THREE.Vector3(0, 0, 1)),
+      surfaceRectHeightScale: uniform(new THREE.Vector4(0, 0, 0, 0)),
+      surfaceScale: uniform(0),
     }))
 
     this.tmpMoonPositionEquatorial = new THREE.Vector3()
@@ -190,17 +331,35 @@ export class MoonOverlay {
     this.tmpProjectedWorld = new THREE.Vector3()
     this.tmpRight = new THREE.Vector3()
     this.tmpUp = new THREE.Vector3()
+    this.tmpBodyNorthEquatorial = new THREE.Vector3()
+    this.tmpBodyForwardEquatorial = new THREE.Vector3()
+    this.tmpBodyRightEquatorial = new THREE.Vector3()
+    this.tmpBodyNorthLocal = new THREE.Vector3()
+    this.tmpBodyForwardLocal = new THREE.Vector3()
+    this.tmpBodyRightLocal = new THREE.Vector3()
+    this.tmpReferenceDirectionEquatorial = new THREE.Vector3()
+    this.tmpSpinQuaternion = new THREE.Quaternion()
     this.sharedGeometry = new THREE.PlaneGeometry(2, 2)
     this.colorQuad = new THREE.Mesh(
       this.sharedGeometry,
-      createMoonColorMaterial(this.moonStates, this.transmittanceTextureNode),
+      createMoonColorMaterialWithSurface(
+        this.moonStates,
+        this.transmittanceTextureNode,
+        this.surfaceAtlasTextureNode,
+        this.surfaceAtlasTexelSize,
+      ),
     )
     this.colorQuad.frustumCulled = false
     this.colorScene.add(this.colorQuad)
 
     this.maskQuad = new THREE.Mesh(
       this.sharedGeometry,
-      createMoonMaskMaterial(this.moonStates, this.transmittanceTextureNode),
+      createMoonMaskMaterial(
+        this.moonStates,
+        this.transmittanceTextureNode,
+        this.surfaceAtlasTextureNode,
+        this.surfaceAtlasTexelSize,
+      ),
     )
     this.maskQuad.frustumCulled = false
     this.maskScene.add(this.maskQuad)
@@ -239,6 +398,15 @@ export class MoonOverlay {
     this.transmittanceTextureNode.value = textureValue ?? new THREE.Texture()
   }
 
+  setSurfaceAtlas(textureValue, texelSize = null) {
+    this.surfaceAtlasTextureNode.value = textureValue ?? new THREE.Texture()
+    if (texelSize) {
+      this.surfaceAtlasTexelSize.value.copy(texelSize)
+    } else {
+      this.surfaceAtlasTexelSize.value.set(1, 1)
+    }
+  }
+
   updateMoonState(moonState, moon, camera, date, width, height) {
     computeKeplerOrbitPosition(date, moon.orbit, this.tmpMoonPositionEquatorial)
     this.tmpMoonPositionLocal
@@ -273,6 +441,7 @@ export class MoonOverlay {
       return
     }
 
+    this.tmpMoonToCamera.copy(this.tmpViewDirection).negate()
     buildMoonViewBasis(camera, this.tmpViewDirection, this.tmpRight, this.tmpUp)
 
     const centerXPx = (this.tmpProjectedCenter.x * 0.5 + 0.5) * width
@@ -300,15 +469,95 @@ export class MoonOverlay {
       .copy(this.sunWorldPosition)
       .sub(this.tmpMoonPositionWorld)
       .normalize()
-    const moonToCamera = this.tmpMoonToCamera.copy(this.tmpViewDirection).negate()
     const upProjection = moonToSun.dot(this.tmpUp)
     const rightProjection = moonToSun.dot(this.tmpRight)
-    const forwardProjection = moonToSun.dot(moonToCamera)
+    const forwardProjection = moonToSun.dot(this.tmpMoonToCamera)
+
+    this.tmpBodyNorthEquatorial.set(0, 1, 0)
+    computeKeplerOrbitPosition(
+      new Date(Number.isFinite(moon.orbit?.epochMs) ? moon.orbit.epochMs : Date.UTC(2000, 0, 1, 12, 0, 0, 0)),
+      moon.orbit,
+      this.tmpReferenceDirectionEquatorial,
+    )
+    this.tmpReferenceDirectionEquatorial.normalize()
+    this.tmpBodyForwardEquatorial
+      .copy(this.tmpReferenceDirectionEquatorial)
+      .addScaledVector(
+        this.tmpBodyNorthEquatorial,
+        -this.tmpReferenceDirectionEquatorial.dot(this.tmpBodyNorthEquatorial),
+      )
+    if (this.tmpBodyForwardEquatorial.lengthSq() <= BODY_AXIS_EPSILON) {
+      this.tmpBodyForwardEquatorial.set(0, 0, 1)
+    } else {
+      this.tmpBodyForwardEquatorial.normalize()
+    }
+    const spinRateDegPerDay = Number.isFinite(moon.spinRateDegPerDay)
+      ? moon.spinRateDegPerDay
+      : 0
+    const spinPhaseDeg = Number.isFinite(moon.spinPhaseDegAtEpoch)
+      ? moon.spinPhaseDegAtEpoch
+      : 0
+    const elapsedDays =
+      (date.getTime() -
+        (Number.isFinite(moon.orbit?.epochMs) ? moon.orbit.epochMs : Date.UTC(2000, 0, 1, 12, 0, 0, 0))) /
+      86400000
+    this.tmpSpinQuaternion.setFromAxisAngle(
+      this.tmpBodyNorthEquatorial,
+      THREE.MathUtils.degToRad(spinPhaseDeg + elapsedDays * spinRateDegPerDay),
+    )
+    this.tmpBodyForwardEquatorial.applyQuaternion(this.tmpSpinQuaternion).normalize()
+    this.tmpBodyRightEquatorial
+      .crossVectors(this.tmpBodyNorthEquatorial, this.tmpBodyForwardEquatorial)
+      .normalize()
+    this.tmpBodyForwardEquatorial
+      .crossVectors(this.tmpBodyRightEquatorial, this.tmpBodyNorthEquatorial)
+      .normalize()
+
+    this.tmpBodyRightLocal
+      .copy(this.tmpBodyRightEquatorial)
+      .applyMatrix4(this.equatorialToLocal)
+      .normalize()
+    this.tmpBodyNorthLocal
+      .copy(this.tmpBodyNorthEquatorial)
+      .applyMatrix4(this.equatorialToLocal)
+      .normalize()
+    this.tmpBodyForwardLocal
+      .copy(this.tmpBodyForwardEquatorial)
+      .applyMatrix4(this.equatorialToLocal)
+      .normalize()
 
     moonState.active.value = 1
     moonState.centerRadiusDistance.value.set(centerXPx, centerYPx, radiusPx, distanceMeters)
     moonState.color.value.copy(this.tmpMoonColorVector)
     moonState.lightLocal.value.set(rightProjection, upProjection, forwardProjection)
+    moonState.bodyRightLocal.value.set(
+      this.tmpBodyRightLocal.dot(this.tmpRight),
+      this.tmpBodyRightLocal.dot(this.tmpUp),
+      this.tmpBodyRightLocal.dot(this.tmpMoonToCamera),
+    )
+    moonState.bodyUpLocal.value.set(
+      this.tmpBodyNorthLocal.dot(this.tmpRight),
+      this.tmpBodyNorthLocal.dot(this.tmpUp),
+      this.tmpBodyNorthLocal.dot(this.tmpMoonToCamera),
+    )
+    moonState.bodyForwardLocal.value.set(
+      this.tmpBodyForwardLocal.dot(this.tmpRight),
+      this.tmpBodyForwardLocal.dot(this.tmpUp),
+      this.tmpBodyForwardLocal.dot(this.tmpMoonToCamera),
+    )
+    const atlasRect = moon.surface?.atlasRect
+    if (atlasRect && moon.surface?.heightScaleM) {
+      moonState.surfaceRectHeightScale.value.set(
+        atlasRect.x,
+        atlasRect.y,
+        atlasRect.width,
+        atlasRect.height,
+      )
+      moonState.surfaceScale.value = Math.max(0, moon.surface.heightScaleM) / Math.max(1, moon.radiusM)
+    } else {
+      moonState.surfaceRectHeightScale.value.set(0, 0, 0, 0)
+      moonState.surfaceScale.value = 0
+    }
   }
 
   update(camera, date, width, height) {
