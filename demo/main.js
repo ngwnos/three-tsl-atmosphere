@@ -38,6 +38,8 @@ const MAX_STAR_SCALE_LIMIT = 8
 const STAR_SCALE_STEP = Math.SQRT2
 const MIN_MOON_SIZE_SCALE = 0.1
 const MAX_MOON_SIZE_SCALE = 10
+const MIN_MOON_HEIGHT_SCALE = 0
+const MAX_MOON_HEIGHT_SCALE = 20
 const DEFAULT_OBSERVER_LATITUDE_DEG = 37.7749
 const DEFAULT_OBSERVER_LONGITUDE_DEG = -122.4194
 const MAX_MOON_COUNT = 16
@@ -235,6 +237,7 @@ let ditheringEnabled = true
 let minStarScale = 0.55
 let maxStarScale = 2.4
 let moonSizeScale = 1
+let moonHeightScale = 1
 let observerLatitudeDeg = DEFAULT_OBSERVER_LATITUDE_DEG
 let observerLongitudeDeg = DEFAULT_OBSERVER_LONGITUDE_DEG
 let lookAtTarget = 'none'
@@ -307,6 +310,7 @@ const paneState = {
   minStarScale,
   maxStarScale,
   moonSizeScale,
+  moonHeightScale,
   altitudeKm: altitudeMeters / 1000,
   observerLatitudeDeg,
   observerLongitudeDeg,
@@ -387,6 +391,7 @@ const syncPaneState = () => {
   paneState.minStarScale = minStarScale
   paneState.maxStarScale = maxStarScale
   paneState.moonSizeScale = moonSizeScale
+  paneState.moonHeightScale = moonHeightScale
   paneState.altitudeKm = altitudeMeters / 1000
   paneState.observerLatitudeDeg = observerLatitudeDeg
   paneState.observerLongitudeDeg = observerLongitudeDeg
@@ -421,6 +426,7 @@ const applyVisualExposure = () => {
   moonOverlay.setSunPosition(sunWorldPosition)
   moonOverlay.setExposure(exposure)
   moonOverlay.setSizeScale(moonSizeScale)
+  moonOverlay.setHeightScaleMultiplier(moonHeightScale)
 }
 
 const applyCameraOrientation = () => {
@@ -1088,6 +1094,18 @@ const buildControlPanel = () => {
       syncPaneState()
     })
   sceneFolder
+    .addBinding(paneState, 'moonHeightScale', {
+      label: 'Moon relief',
+      min: MIN_MOON_HEIGHT_SCALE,
+      max: MAX_MOON_HEIGHT_SCALE,
+      step: 0.01,
+    })
+    .on('change', (event) => {
+      moonHeightScale = event.value
+      moonOverlay.setHeightScaleMultiplier(moonHeightScale)
+      syncPaneState()
+    })
+  sceneFolder
     .addBinding(paneState, 'ditheringEnabled', {
       label: 'Dither',
     })
@@ -1591,6 +1609,7 @@ const createTestApi = () => ({
     minStarScale,
     maxStarScale,
     moonSizeScale,
+    moonHeightScale,
     moonCount: activeMoons.length,
     altitudeMeters,
     cameraFov: camera.fov,

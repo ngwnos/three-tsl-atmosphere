@@ -301,6 +301,7 @@ export class MoonOverlay {
     this.sunWorldPosition = new THREE.Vector3(0, 1, 0)
     this.exposure = DEFAULT_EXPOSURE
     this.sizeScale = 1
+    this.heightScaleMultiplier = 1
     this.displayDistance = Math.max(1, options.displayDistance ?? DEFAULT_DISPLAY_DISTANCE)
     this.moons = []
     this.transmittanceTextureNode = texture(new THREE.Texture())
@@ -392,6 +393,10 @@ export class MoonOverlay {
 
   setSizeScale(scale) {
     this.sizeScale = Math.max(0.01, scale)
+  }
+
+  setHeightScaleMultiplier(scale) {
+    this.heightScaleMultiplier = Math.max(0, scale)
   }
 
   setTransmittanceTexture(textureValue) {
@@ -553,7 +558,9 @@ export class MoonOverlay {
         atlasRect.width,
         atlasRect.height,
       )
-      moonState.surfaceScale.value = Math.max(0, moon.surface.heightScaleM) / Math.max(1, moon.radiusM)
+      moonState.surfaceScale.value =
+        (Math.max(0, moon.surface.heightScaleM) * this.heightScaleMultiplier) /
+        Math.max(1, moon.radiusM)
     } else {
       moonState.surfaceRectHeightScale.value.set(0, 0, 0, 0)
       moonState.surfaceScale.value = 0
