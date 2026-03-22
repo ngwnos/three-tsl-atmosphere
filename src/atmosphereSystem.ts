@@ -16,9 +16,11 @@ import {
   smoothstep,
   sqrt,
   texture,
+  uvec2,
   uniform,
   vec3,
   vec4,
+  viewportCoordinate,
 } from 'three/tsl'
 
 import { AtmosphereContextNode } from './bruneton/AtmosphereContextNode'
@@ -358,7 +360,7 @@ export const createAtmosphereSystem = (
       const worldViewDirection = normalize(
         screenCameraMatrixWorld.mul(vec4(directionView, float(0))).xyz,
       ).toVar()
-      const celestialSample = texture(celestialTextureNode, screenUV).rgb.toVar()
+      const celestialSample = celestialTextureNode.load(uvec2(viewportCoordinate)).rgb.toVar()
 
       const cameraUnit = worldOrigin
         .sub(atmosphereContext.planetCenterWorld)

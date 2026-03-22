@@ -390,6 +390,9 @@ const ensureDisplayResources = () => {
     stencilBuffer: false,
     samples: 0,
   })
+  celestialTarget.texture.minFilter = THREE.NearestFilter
+  celestialTarget.texture.magFilter = THREE.NearestFilter
+  celestialTarget.texture.generateMipmaps = false
   const sceneTarget = new THREE.RenderTarget(width, height, {
     format: THREE.RGBAFormat,
     type: THREE.HalfFloatType,
@@ -449,6 +452,9 @@ const ensureCaptureResources = (width, height) => {
     stencilBuffer: false,
     samples: 0,
   })
+  celestialTarget.texture.minFilter = THREE.NearestFilter
+  celestialTarget.texture.magFilter = THREE.NearestFilter
+  celestialTarget.texture.generateMipmaps = false
   const sceneTarget = new THREE.RenderTarget(resolvedWidth, resolvedHeight, {
     format: THREE.RGBAFormat,
     type: THREE.HalfFloatType,
