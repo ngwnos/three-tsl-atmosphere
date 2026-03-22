@@ -15,6 +15,7 @@ import {
   select,
   smoothstep,
   sqrt,
+  texture,
   uniform,
   vec3,
   vec4,
@@ -94,6 +95,7 @@ export type AtmosphereSystemOptions = {
 export type AtmosphereSystem = {
   prime: (renderer: WebGPURenderer) => Promise<void>
   renderBackground: (renderer: WebGPURenderer, camera: THREE.Camera) => void
+  setCelestialTexture: (texture: THREE.Texture | null) => void
   setSettings: (next: AtmosphereSettings) => void
   setSunDirection: (directionWorld: THREE.Vector3) => void
   setCameraPosition: (positionWorld: THREE.Vector3) => void
@@ -261,6 +263,7 @@ export const createAtmosphereSystem = (
   const screenCameraMatrixWorld = uniform(new THREE.Matrix4())
   const screenCameraWorldPosition = uniform(new THREE.Vector3())
   const screenCameraIsOrthographic = uniform(false)
+  const celestialTextureNode = texture(new THREE.Texture())
 
   const geometry = new THREE.SphereGeometry(skyDomeRadiusMeters * worldUnitsPerMeter, 64, 32)
 
@@ -355,8 +358,20 @@ export const createAtmosphereSystem = (
       const worldViewDirection = normalize(
         screenCameraMatrixWorld.mul(vec4(directionView, float(0))).xyz,
       ).toVar()
+      const celestialSample = texture(celestialTextureNode, screenUV).rgb.toVar()
 
-      return vec4(buildSkyLuminanceNode(worldOrigin, worldViewDirection, false), float(1))
+      const cameraUnit = worldOrigin
+        .sub(atmosphereContext.planetCenterWorld)
+        .mul(atmosphereContext.worldToUnitScene)
+        .toVar()
+      const worldSunDir = normalize(atmosphereContext.sunDirectionWorld).toVar()
+      const skyTransfer = getSkyLuminance(cameraUnit, worldViewDirection, float(0), worldSunDir).toVar()
+      const skyLuminance = buildSkyLuminanceNode(worldOrigin, worldViewDirection, false).toVar()
+      const compositeLuminance = skyLuminance
+        .add(skyTransfer.get('transmittance').mul(celestialSample))
+        .toVar()
+
+      return vec4(compositeLuminance, float(1))
     })()
 
   const createSkyMaterial = (): MeshBasicNodeMaterial => {
@@ -588,6 +603,10 @@ export const createAtmosphereSystem = (
     }
   }
 
+  const setCelestialTexture = (nextTexture: THREE.Texture | null): void => {
+    celestialTextureNode.value = nextTexture ?? new THREE.Texture()
+  }
+
   const renderBackground = (renderer: WebGPURenderer, camera: THREE.Camera): void => {
     if (!backgroundScene || !backgroundCamera) {
       return
@@ -629,6 +648,7 @@ export const createAtmosphereSystem = (
   return {
     prime,
     renderBackground,
+    setCelestialTexture,
     setSettings,
     setSunDirection,
     setCameraPosition,

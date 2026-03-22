@@ -351,7 +351,8 @@ const renderDisplayFrame = () => {
     return
   }
 
-  renderAtmosphereScene(resources.sceneTarget)
+  renderCelestialScene(resources.celestialTarget, resources.width, resources.height)
+  renderAtmosphereScene(resources.sceneTarget, resources.celestialTarget.texture)
   renderer.setRenderTarget(null)
   renderer.clear()
   renderer.render(resources.postScene, resources.postCamera)
@@ -363,6 +364,7 @@ const disposeDisplayResources = () => {
   }
 
   displayResources.dispose()
+  displayResources.celestialTarget.dispose()
   displayResources.sceneTarget.dispose()
   displayResources = null
 }
@@ -380,6 +382,14 @@ const ensureDisplayResources = () => {
 
   disposeDisplayResources()
 
+  const celestialTarget = new THREE.RenderTarget(width, height, {
+    format: THREE.RGBAFormat,
+    type: THREE.HalfFloatType,
+    colorSpace: THREE.LinearSRGBColorSpace,
+    depthBuffer: false,
+    stencilBuffer: false,
+    samples: 0,
+  })
   const sceneTarget = new THREE.RenderTarget(width, height, {
     format: THREE.RGBAFormat,
     type: THREE.HalfFloatType,
@@ -388,6 +398,7 @@ const ensureDisplayResources = () => {
     stencilBuffer: false,
     samples: 0,
   })
+  renderer.initRenderTarget(celestialTarget)
   renderer.initRenderTarget(sceneTarget)
 
   const ditherPass = createBlueNoiseDitherPass(sceneTarget.texture, width, height, blueNoiseTexture)
@@ -396,6 +407,7 @@ const ensureDisplayResources = () => {
   displayResources = {
     width,
     height,
+    celestialTarget,
     sceneTarget,
     ...ditherPass,
   }
@@ -409,6 +421,7 @@ const disposeCaptureResources = () => {
   }
 
   captureResources.dispose()
+  captureResources.celestialTarget.dispose()
   captureResources.sceneTarget.dispose()
   captureResources.outputTarget.dispose()
   captureResources.previewCanvas.remove()
@@ -428,6 +441,14 @@ const ensureCaptureResources = (width, height) => {
 
   disposeCaptureResources()
 
+  const celestialTarget = new THREE.RenderTarget(resolvedWidth, resolvedHeight, {
+    format: THREE.RGBAFormat,
+    type: THREE.HalfFloatType,
+    colorSpace: THREE.LinearSRGBColorSpace,
+    depthBuffer: false,
+    stencilBuffer: false,
+    samples: 0,
+  })
   const sceneTarget = new THREE.RenderTarget(resolvedWidth, resolvedHeight, {
     format: THREE.RGBAFormat,
     type: THREE.HalfFloatType,
@@ -444,6 +465,7 @@ const ensureCaptureResources = (width, height) => {
     stencilBuffer: false,
     samples: 0,
   })
+  renderer.initRenderTarget(celestialTarget)
   renderer.initRenderTarget(sceneTarget)
   renderer.initRenderTarget(outputTarget)
   const ditherPass = createBlueNoiseDitherPass(
@@ -469,6 +491,7 @@ const ensureCaptureResources = (width, height) => {
   captureResources = {
     width: resolvedWidth,
     height: resolvedHeight,
+    celestialTarget,
     sceneTarget,
     outputTarget,
     ...ditherPass,
@@ -477,17 +500,23 @@ const ensureCaptureResources = (width, height) => {
   return captureResources
 }
 
-const renderAtmosphereScene = (target) => {
+const renderCelestialScene = (target, width, height) => {
+  renderer.setRenderTarget(target)
+  renderer.clear()
+  if (starsEnabled) {
+    starOverlay.render(renderer, camera, sunState.altitudeDeg, width, height)
+  }
+  moonOverlay.render(renderer, camera, sunDateTime)
+}
+
+const renderAtmosphereScene = (target, celestialTexture) => {
   renderer.setRenderTarget(target)
   renderer.clear()
   gridOverlay.setCameraPosition(camera.position)
   atmosphereRig.update(renderer, camera)
+  atmosphereRig.setCelestialTexture(celestialTexture)
   atmosphereRig.renderBackground(renderer, camera)
   renderer.render(scene, camera)
-  if (starsEnabled) {
-    starOverlay.render(renderer, camera, sunState.altitudeDeg)
-  }
-  moonOverlay.render(renderer, camera, sunDateTime)
 }
 
 const setDitheringEnabled = (enabled) => {
@@ -536,7 +565,8 @@ const renderCaptureFrame = async (elapsedTime, width, height) => {
   camera.updateProjectionMatrix()
   try {
     await atmosphereRig.prime(renderer)
-    renderAtmosphereScene(resources.sceneTarget)
+    renderCelestialScene(resources.celestialTarget, resources.width, resources.height)
+    renderAtmosphereScene(resources.sceneTarget, resources.celestialTarget.texture)
     renderer.setRenderTarget(resources.outputTarget)
     renderer.clear()
     renderer.render(resources.postScene, resources.postCamera)

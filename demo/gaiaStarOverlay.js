@@ -459,14 +459,14 @@ export class GaiaStarOverlay {
     this.fovBoostU.value = computeFovBoost(camera.fov)
   }
 
-  render(renderer, camera, sunAltitudeDeg) {
+  render(renderer, camera, sunAltitudeDeg, width = null, height = null) {
     if (!this.starCount) return
 
-    const width = renderer.domElement.width
-    const height = renderer.domElement.height
-    if (width <= 0 || height <= 0) return
+    const resolvedWidth = width ?? renderer.domElement.width
+    const resolvedHeight = height ?? renderer.domElement.height
+    if (resolvedWidth <= 0 || resolvedHeight <= 0) return
 
-    this.ensureAccumulator(width, height)
+    this.ensureAccumulator(resolvedWidth, resolvedHeight)
     this.update(camera, sunAltitudeDeg)
 
     renderer.compute(this.clearAccumCompute)

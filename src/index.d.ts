@@ -44,6 +44,7 @@ export type AtmosphereSystemOptions = {
 export type AtmosphereSystem = {
   prime: (renderer: WebGPURenderer) => Promise<void>
   renderBackground: (renderer: WebGPURenderer, camera: THREE.Camera) => void
+  setCelestialTexture: (texture: THREE.Texture | null) => void
   setSettings: (next: AtmosphereSettings) => void
   setSunDirection: (directionWorld: THREE.Vector3) => void
   setCameraPosition: (positionWorld: THREE.Vector3) => void
@@ -116,6 +117,7 @@ export type AtmosphereRig = {
   ambientLight: THREE.HemisphereLight
   prime: (renderer: WebGPURenderer) => Promise<void>
   renderBackground: (renderer: WebGPURenderer, camera: THREE.Camera) => void
+  setCelestialTexture: (texture: THREE.Texture | null) => void
   update: (renderer: WebGPURenderer, camera?: THREE.Camera | null) => void
   setSun: (next: Partial<AtmosphereSunState>) => void
   setSunAngles: (altitudeDeg: number, azimuthDeg: number) => void
