@@ -2,6 +2,10 @@ import * as THREE from 'three'
 import { WebGPURenderer } from 'three/webgpu'
 import { Pane } from 'tweakpane'
 import { createAtmosphereRig, DEFAULT_ATMOSPHERE_SETTINGS } from 'three-tsl-atmosphere'
+import {
+  makeEquatorialToLocalMatrix,
+  computeSunLocalAltAz,
+} from './astronomy.js'
 import { createBlueNoiseDitherPass, loadBlueNoiseTexture } from './blueNoiseDither.js'
 import { GaiaStarOverlay } from './gaiaStarOverlay.js'
 import { SkyGridOverlay } from './skyGridOverlay.js'
@@ -25,6 +29,7 @@ const MAX_ALTITUDE_METERS = 2_000_000
 const MIN_ALTITUDE_SPEED_MPS = 10_000
 const ALTITUDE_SPEED_FACTOR = 1.5
 const SUN_ALTITUDE_STEP_DEG = 2
+const SUN_TIME_STEP_MINUTES = 30
 const MIN_SUN_ALTITUDE_DEG = -90
 const MAX_SUN_ALTITUDE_DEG = 90
 const MIN_EXPOSURE = 0.125
@@ -35,12 +40,33 @@ const MAX_STAR_SCALE_LIMIT = 8
 const STAR_SCALE_STEP = Math.SQRT2
 const DEFAULT_OBSERVER_LATITUDE_DEG = 37.7749
 const DEFAULT_OBSERVER_LONGITUDE_DEG = -122.4194
-const GREENWICH_SIDEREAL_ANGLE_DEG = 25
 const GAIA_CHUNK_COUNT = 60
 const GAIA_STARS_PER_CHUNK = 100_000
 const GAIA_CHUNK_URLS = Array.from({ length: GAIA_CHUNK_COUNT }, (_, index) =>
   `/data/gaia/chunk_${String(index).padStart(4, '0')}.bin`,
 )
+const pad2 = (value) => String(value).padStart(2, '0')
+const roundDateToMinute = (date) => {
+  const rounded = new Date(date)
+  rounded.setSeconds(0, 0)
+  return rounded
+}
+const formatLocalDateInput = (date) =>
+  `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`
+const formatLocalTimeInput = (date) =>
+  `${pad2(date.getHours())}:${pad2(date.getMinutes())}`
+const parseLocalDateTimeInput = (dateString, timeString) => {
+  if (!dateString || !timeString) {
+    return null
+  }
+
+  const parsed = new Date(`${dateString}T${timeString}`)
+  if (Number.isNaN(parsed.getTime())) {
+    return null
+  }
+
+  return roundDateToMinute(parsed)
+}
 
 const canvas = document.querySelector('#app')
 if (!(canvas instanceof HTMLCanvasElement)) {
@@ -63,8 +89,6 @@ const zoomAfterDirection = new THREE.Vector3()
 const zoomRotation = new THREE.Quaternion()
 const zoomedCameraQuaternion = new THREE.Quaternion()
 const planetCenter = new THREE.Vector3()
-const equatorialTiltQuaternion = new THREE.Quaternion()
-const siderealQuaternion = new THREE.Quaternion()
 const equatorialToLocalQuaternion = new THREE.Quaternion()
 const equatorialToLocalMatrix = new THREE.Matrix4()
 const MAX_PITCH = Math.PI * 0.48
@@ -88,12 +112,16 @@ let minStarScale = 0.55
 let maxStarScale = 2.4
 let observerLatitudeDeg = DEFAULT_OBSERVER_LATITUDE_DEG
 let observerLongitudeDeg = DEFAULT_OBSERVER_LONGITUDE_DEG
+let sunDateTime = roundDateToMinute(new Date())
+let manualSunOverrideEnabled = false
+let manualSunAltitudeDeg = 24
+let manualSunAzimuthDeg = -35
 let blueNoiseTexture = null
 let displayResources = null
 let captureResources = null
 const sunState = {
-  altitudeDeg: 24,
-  azimuthDeg: -35,
+  altitudeDeg: manualSunAltitudeDeg,
+  azimuthDeg: manualSunAzimuthDeg,
   intensity: 6,
 }
 const movementState = {
@@ -133,8 +161,11 @@ const pane = new Pane({
 })
 const paneState = {
   preset: 'earth',
-  sunAltitudeDeg: sunState.altitudeDeg,
-  sunAzimuthDeg: sunState.azimuthDeg,
+  sunDate: formatLocalDateInput(sunDateTime),
+  sunTime: formatLocalTimeInput(sunDateTime),
+  manualSunOverrideEnabled,
+  manualSunAltitudeDeg,
+  manualSunAzimuthDeg,
   exposure,
   ditheringEnabled,
   minStarScale,
@@ -146,24 +177,42 @@ const paneState = {
   showRaDecGrid: gridState.showRaDecGrid,
 }
 
-const updateEquatorialFrame = () => {
-  equatorialTiltQuaternion.setFromAxisAngle(
-    new THREE.Vector3(1, 0, 0),
-    THREE.MathUtils.degToRad(90 - observerLatitudeDeg),
+const applyResolvedSunAngles = () => {
+  if (manualSunOverrideEnabled) {
+    sunState.altitudeDeg = manualSunAltitudeDeg
+    sunState.azimuthDeg = manualSunAzimuthDeg
+  } else {
+    const { altitudeDeg, azimuthDeg } = computeSunLocalAltAz(
+      sunDateTime,
+      equatorialToLocalMatrix,
+    )
+    sunState.altitudeDeg = altitudeDeg
+    sunState.azimuthDeg = azimuthDeg
+  }
+
+  atmosphereRig.setSunAngles(sunState.altitudeDeg, sunState.azimuthDeg)
+}
+
+const updateAstronomyFrame = () => {
+  makeEquatorialToLocalMatrix(
+    sunDateTime,
+    observerLatitudeDeg,
+    observerLongitudeDeg,
+    equatorialToLocalMatrix,
   )
-  siderealQuaternion.setFromAxisAngle(
-    new THREE.Vector3(0, 1, 0),
-    THREE.MathUtils.degToRad(GREENWICH_SIDEREAL_ANGLE_DEG + observerLongitudeDeg),
-  )
-  equatorialToLocalQuaternion.copy(equatorialTiltQuaternion).multiply(siderealQuaternion)
-  equatorialToLocalMatrix.makeRotationFromQuaternion(equatorialToLocalQuaternion)
+  equatorialToLocalQuaternion.setFromRotationMatrix(equatorialToLocalMatrix)
   gridOverlay.setEquatorialToLocal(equatorialToLocalQuaternion)
+  starOverlay.setEquatorialToLocal(equatorialToLocalMatrix)
+  applyResolvedSunAngles()
 }
 
 const syncPaneState = () => {
   paneState.preset = atmospherePreset
-  paneState.sunAltitudeDeg = sunState.altitudeDeg
-  paneState.sunAzimuthDeg = sunState.azimuthDeg
+  paneState.sunDate = formatLocalDateInput(sunDateTime)
+  paneState.sunTime = formatLocalTimeInput(sunDateTime)
+  paneState.manualSunOverrideEnabled = manualSunOverrideEnabled
+  paneState.manualSunAltitudeDeg = manualSunAltitudeDeg
+  paneState.manualSunAzimuthDeg = manualSunAzimuthDeg
   paneState.exposure = exposure
   paneState.ditheringEnabled = ditheringEnabled
   paneState.minStarScale = minStarScale
@@ -184,7 +233,6 @@ const applyVisualExposure = () => {
   })
   planetCenter.set(0, -atmosphereSettings.planetRadiusM, 0)
   starOverlay.setPlanet(planetCenter, atmosphereSettings.planetRadiusM)
-  starOverlay.setEquatorialToLocal(equatorialToLocalMatrix)
   starOverlay.setExposure(exposure)
   starOverlay.setScaleRange(minStarScale, maxStarScale)
 }
@@ -438,13 +486,44 @@ const toggleAtmospherePreset = () => {
   setAtmospherePreset(atmospherePreset === 'alternate' ? 'earth' : 'alternate')
 }
 
-const adjustSunAltitude = (deltaDeg) => {
-  sunState.altitudeDeg = THREE.MathUtils.clamp(
-    sunState.altitudeDeg + deltaDeg,
+const shiftSunDateTimeMinutes = (deltaMinutes) => {
+  sunDateTime = roundDateToMinute(
+    new Date(sunDateTime.getTime() + deltaMinutes * 60 * 1000),
+  )
+  updateAstronomyFrame()
+  syncPaneState()
+}
+
+const adjustManualSunAltitude = (deltaDeg) => {
+  manualSunAltitudeDeg = THREE.MathUtils.clamp(
+    manualSunAltitudeDeg + deltaDeg,
     MIN_SUN_ALTITUDE_DEG,
     MAX_SUN_ALTITUDE_DEG,
   )
-  atmosphereRig.setSunAngles(sunState.altitudeDeg, sunState.azimuthDeg)
+  if (manualSunOverrideEnabled) {
+    applyResolvedSunAngles()
+  }
+  syncPaneState()
+}
+
+const adjustSunControl = (deltaDeg) => {
+  if (manualSunOverrideEnabled) {
+    adjustManualSunAltitude(deltaDeg)
+    return
+  }
+
+  shiftSunDateTimeMinutes((deltaDeg / SUN_ALTITUDE_STEP_DEG) * SUN_TIME_STEP_MINUTES)
+}
+
+const setSunDateTimeFromInputs = (dateString, timeString) => {
+  const nextDateTime = parseLocalDateTimeInput(dateString, timeString)
+  if (!nextDateTime) {
+    syncPaneState()
+    return
+  }
+
+  sunDateTime = nextDateTime
+  updateAstronomyFrame()
   syncPaneState()
 }
 
@@ -562,27 +641,54 @@ const buildControlPanel = () => {
       setAtmospherePreset(event.value)
     })
   sceneFolder
-    .addBinding(paneState, 'sunAltitudeDeg', {
-      label: 'Sun alt',
+    .addBinding(paneState, 'sunDate', {
+      label: 'Date',
+    })
+    .on('change', (event) => {
+      setSunDateTimeFromInputs(event.value, paneState.sunTime)
+    })
+  sceneFolder
+    .addBinding(paneState, 'sunTime', {
+      label: 'Time',
+    })
+    .on('change', (event) => {
+      setSunDateTimeFromInputs(paneState.sunDate, event.value)
+    })
+  sceneFolder
+    .addBinding(paneState, 'manualSunOverrideEnabled', {
+      label: 'Manual sun',
+    })
+    .on('change', (event) => {
+      manualSunOverrideEnabled = event.value
+      applyResolvedSunAngles()
+      syncPaneState()
+    })
+  sceneFolder
+    .addBinding(paneState, 'manualSunAltitudeDeg', {
+      label: 'Local alt',
       min: MIN_SUN_ALTITUDE_DEG,
       max: MAX_SUN_ALTITUDE_DEG,
       step: 0.1,
     })
     .on('change', (event) => {
-      sunState.altitudeDeg = event.value
-      atmosphereRig.setSunAngles(sunState.altitudeDeg, sunState.azimuthDeg)
+      manualSunAltitudeDeg = event.value
+      if (manualSunOverrideEnabled) {
+        applyResolvedSunAngles()
+      }
       syncPaneState()
     })
   sceneFolder
-    .addBinding(paneState, 'sunAzimuthDeg', {
-      label: 'Sun az',
+    .addBinding(paneState, 'manualSunAzimuthDeg', {
+      label: 'Local az',
       min: -180,
       max: 180,
       step: 0.1,
     })
     .on('change', (event) => {
-      sunState.azimuthDeg = event.value
-      atmosphereRig.setSunAngles(sunState.altitudeDeg, sunState.azimuthDeg)
+      manualSunAzimuthDeg = event.value
+      if (manualSunOverrideEnabled) {
+        applyResolvedSunAngles()
+      }
       syncPaneState()
     })
   sceneFolder
@@ -613,8 +719,7 @@ const buildControlPanel = () => {
     })
     .on('change', (event) => {
       observerLatitudeDeg = event.value
-      updateEquatorialFrame()
-      applyVisualExposure()
+      updateAstronomyFrame()
       syncPaneState()
     })
   sceneFolder
@@ -626,8 +731,7 @@ const buildControlPanel = () => {
     })
     .on('change', (event) => {
       observerLongitudeDeg = event.value
-      updateEquatorialFrame()
-      applyVisualExposure()
+      updateAstronomyFrame()
       syncPaneState()
     })
 
@@ -851,7 +955,7 @@ const buildControlPanel = () => {
 
 canvas.style.cursor = 'grab'
 canvas.style.touchAction = 'none'
-updateEquatorialFrame()
+updateAstronomyFrame()
 gridOverlay.setAltAzEnabled(gridState.showAltAzGrid)
 gridOverlay.setRaDecEnabled(gridState.showRaDecGrid)
 buildControlPanel()
@@ -920,13 +1024,13 @@ window.addEventListener('keydown', (event) => {
 
   if (event.key === '=') {
     event.preventDefault()
-    adjustSunAltitude(SUN_ALTITUDE_STEP_DEG)
+    adjustSunControl(SUN_ALTITUDE_STEP_DEG)
     return
   }
 
   if (event.key === '-') {
     event.preventDefault()
-    adjustSunAltitude(-SUN_ALTITUDE_STEP_DEG)
+    adjustSunControl(-SUN_ALTITUDE_STEP_DEG)
     return
   }
 
@@ -1085,6 +1189,12 @@ const createTestApi = () => ({
     atmospherePreset,
     atmosphereSettings: { ...atmosphereSettings },
     sunState: { ...sunState },
+    sunDateTimeIso: sunDateTime.toISOString(),
+    manualSunOverrideEnabled,
+    manualSunAltitudeDeg,
+    manualSunAzimuthDeg,
+    observerLatitudeDeg,
+    observerLongitudeDeg,
     exposure,
     ditheringEnabled,
     minStarScale,
@@ -1105,9 +1215,26 @@ const createTestApi = () => ({
     return sampleCanvasStats()
   },
   async setSunAngles(altitudeDeg, azimuthDeg = sunState.azimuthDeg) {
-    sunState.altitudeDeg = altitudeDeg
-    sunState.azimuthDeg = azimuthDeg
-    atmosphereRig.setSunAngles(sunState.altitudeDeg, sunState.azimuthDeg)
+    manualSunOverrideEnabled = true
+    manualSunAltitudeDeg = altitudeDeg
+    manualSunAzimuthDeg = azimuthDeg
+    applyResolvedSunAngles()
+    syncPaneState()
+    await waitForFrames(2)
+    renderDisplayFrame()
+    return sampleCanvasStats()
+  },
+  async setSunDateTime(dateTimeValue) {
+    const nextDateTime =
+      dateTimeValue instanceof Date
+        ? roundDateToMinute(dateTimeValue)
+        : roundDateToMinute(new Date(dateTimeValue))
+    if (Number.isNaN(nextDateTime.getTime())) {
+      throw new Error(`Invalid sun date/time: ${String(dateTimeValue)}`)
+    }
+    manualSunOverrideEnabled = false
+    sunDateTime = nextDateTime
+    updateAstronomyFrame()
     syncPaneState()
     await waitForFrames(2)
     renderDisplayFrame()
