@@ -41,17 +41,27 @@ const MAX_MOON_SIZE_SCALE = 10
 const DEFAULT_OBSERVER_LATITUDE_DEG = 37.7749
 const DEFAULT_OBSERVER_LONGITUDE_DEG = -122.4194
 const MAX_MOON_COUNT = 16
+const DEFAULT_GAIA_CHUNK_COUNT = 1
+const MAX_GAIA_CHUNK_COUNT = 60
 const PRIMARY_MOON_HEIGHT_ATLAS_ID = 'primary-moon-test'
 const MOON_HEIGHT_ATLAS = createGeneratedMoonHeightAtlas([
   {
     id: PRIMARY_MOON_HEIGHT_ATLAS_ID,
   },
 ])
-const GAIA_CHUNK_COUNT = 60
 const GAIA_STARS_PER_CHUNK = 100_000
-const GAIA_CHUNK_URLS = Array.from({ length: GAIA_CHUNK_COUNT }, (_, index) =>
-  `/data/gaia/chunk_${String(index).padStart(4, '0')}.bin`,
-)
+const buildGaiaChunkUrls = (chunkCount) =>
+  Array.from({ length: chunkCount }, (_, index) =>
+    `/data/gaia/chunk_${String(index).padStart(4, '0')}.bin`,
+  )
+const resolveGaiaChunkCount = (value) => {
+  const parsed = Number.parseInt(value ?? '', 10)
+  if (!Number.isFinite(parsed)) {
+    return DEFAULT_GAIA_CHUNK_COUNT
+  }
+
+  return THREE.MathUtils.clamp(parsed, 1, MAX_GAIA_CHUNK_COUNT)
+}
 const pad2 = (value) => String(value).padStart(2, '0')
 const roundDateToMinute = (date) => {
   const rounded = new Date(date)
@@ -158,6 +168,8 @@ if (!(controlPanelContainer instanceof HTMLDivElement)) {
 }
 const urlParams = new URLSearchParams(window.location.search)
 const starsEnabled = urlParams.get('stars') !== 'off'
+const gaiaChunkCount = resolveGaiaChunkCount(urlParams.get('chunks'))
+const gaiaChunkUrls = buildGaiaChunkUrls(gaiaChunkCount)
 
 const scene = new THREE.Scene()
 const ZERO_VECTOR = new THREE.Vector3(0, 0, 0)
@@ -1600,8 +1612,8 @@ const bootstrap = async () => {
   const [, , resolvedBlueNoiseTexture] = await Promise.all([
     atmosphereRig.prime(renderer),
     starsEnabled
-      ? starOverlay.load(GAIA_CHUNK_URLS, {
-          expectedStarCount: GAIA_CHUNK_COUNT * GAIA_STARS_PER_CHUNK,
+      ? starOverlay.load(gaiaChunkUrls, {
+          expectedStarCount: gaiaChunkCount * GAIA_STARS_PER_CHUNK,
         })
       : Promise.resolve(),
     loadBlueNoiseTexture('/LDR_RGBA_0.png'),
