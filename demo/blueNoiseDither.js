@@ -24,11 +24,12 @@ export const createBlueNoiseDitherPass = (sourceTexture, width, height, blueNois
   const noiseScale = uniform(
     new THREE.Vector2(width / BLUE_NOISE_TILE_SIZE, height / BLUE_NOISE_TILE_SIZE),
   )
+  const ditherStrength = uniform(DITHER_STRENGTH)
 
   const material = new MeshBasicNodeMaterial()
   const sourceSample = texture(sourceTexture, vec2(screenUV.x, screenUV.y))
   const blueNoiseSample = blueNoiseTexture
-    ? texture(blueNoiseTexture, screenUV.mul(noiseScale)).rgb.sub(vec3(0.5)).mul(DITHER_STRENGTH)
+    ? texture(blueNoiseTexture, screenUV.mul(noiseScale)).rgb.sub(vec3(0.5)).mul(ditherStrength)
     : vec3(0)
 
   material.colorNode = sourceSample.rgb.add(blueNoiseSample)
@@ -49,6 +50,9 @@ export const createBlueNoiseDitherPass = (sourceTexture, width, height, blueNois
         nextWidth / BLUE_NOISE_TILE_SIZE,
         nextHeight / BLUE_NOISE_TILE_SIZE,
       )
+    },
+    setEnabled(enabled) {
+      ditherStrength.value = enabled ? DITHER_STRENGTH : 0
     },
     dispose() {
       postScene.remove(postQuad)

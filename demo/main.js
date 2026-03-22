@@ -81,6 +81,7 @@ let atmospherePreset = 'earth'
 const atmosphereSettings = { ...EARTH_ATMOSPHERE_SETTINGS }
 let altitudeMeters = MIN_ALTITUDE_METERS
 let exposure = 1
+let ditheringEnabled = true
 let minStarScale = 0.55
 let maxStarScale = 2.4
 let observerLatitudeDeg = DEFAULT_OBSERVER_LATITUDE_DEG
@@ -133,6 +134,7 @@ const paneState = {
   sunAltitudeDeg: sunState.altitudeDeg,
   sunAzimuthDeg: sunState.azimuthDeg,
   exposure,
+  ditheringEnabled,
   minStarScale,
   maxStarScale,
   altitudeKm: altitudeMeters / 1000,
@@ -161,6 +163,7 @@ const syncPaneState = () => {
   paneState.sunAltitudeDeg = sunState.altitudeDeg
   paneState.sunAzimuthDeg = sunState.azimuthDeg
   paneState.exposure = exposure
+  paneState.ditheringEnabled = ditheringEnabled
   paneState.minStarScale = minStarScale
   paneState.maxStarScale = maxStarScale
   paneState.altitudeKm = altitudeMeters / 1000
@@ -257,6 +260,7 @@ const ensureDisplayResources = () => {
   renderer.initRenderTarget(sceneTarget)
 
   const ditherPass = createBlueNoiseDitherPass(sceneTarget.texture, width, height, blueNoiseTexture)
+  ditherPass.setEnabled(ditheringEnabled)
 
   displayResources = {
     width,
@@ -317,6 +321,7 @@ const ensureCaptureResources = (width, height) => {
     resolvedHeight,
     blueNoiseTexture,
   )
+  ditherPass.setEnabled(ditheringEnabled)
 
   const previewCanvas = document.createElement('canvas')
   previewCanvas.width = resolvedWidth
@@ -350,6 +355,13 @@ const renderAtmosphereScene = (target) => {
   if (starsEnabled) {
     starOverlay.render(renderer, camera, sunState.altitudeDeg)
   }
+}
+
+const setDitheringEnabled = (enabled) => {
+  ditheringEnabled = enabled
+  displayResources?.setEnabled(ditheringEnabled)
+  captureResources?.setEnabled(ditheringEnabled)
+  syncPaneState()
 }
 
 const readPackedRenderTargetRgba = async (target, width, height) => {
@@ -582,6 +594,13 @@ const buildControlPanel = () => {
       exposure = event.value
       applyVisualExposure()
       syncPaneState()
+    })
+  sceneFolder
+    .addBinding(paneState, 'ditheringEnabled', {
+      label: 'Dither',
+    })
+    .on('change', (event) => {
+      setDitheringEnabled(event.value)
     })
   sceneFolder
     .addBinding(paneState, 'observerLatitudeDeg', {
@@ -1065,6 +1084,7 @@ const createTestApi = () => ({
     atmosphereSettings: { ...atmosphereSettings },
     sunState: { ...sunState },
     exposure,
+    ditheringEnabled,
     minStarScale,
     maxStarScale,
     altitudeMeters,
