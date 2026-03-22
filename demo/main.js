@@ -39,11 +39,14 @@ const MIN_MOON_SIZE_SCALE = 0.1
 const MAX_MOON_SIZE_SCALE = 10
 const MIN_MOON_HEIGHT_SCALE = 0
 const MAX_MOON_HEIGHT_SCALE = 20
+const MIN_MOON_SPIN_SCALE = 0
+const MAX_MOON_SPIN_SCALE = 50
 const DEFAULT_OBSERVER_LATITUDE_DEG = 37.7749
 const DEFAULT_OBSERVER_LONGITUDE_DEG = -122.4194
 const MAX_MOON_COUNT = 16
 const DEFAULT_GAIA_CHUNK_COUNT = 1
 const MAX_GAIA_CHUNK_COUNT = 60
+const REAL_MOON_SPIN_RATE_DEG_PER_DAY = 360 / 27.321661
 const GAIA_STARS_PER_CHUNK = 100_000
 const buildGaiaChunkUrls = (chunkCount) =>
   Array.from({ length: chunkCount }, (_, index) =>
@@ -114,7 +117,7 @@ const EARTH_MOONS = [
     radiusM: 1_737_400,
     albedo: 0.12,
     reflectanceColor: 0xcfd6e6,
-    spinRateDegPerDay: 360 / 27.321661,
+    spinRateDegPerDay: REAL_MOON_SPIN_RATE_DEG_PER_DAY,
     spinPhaseDegAtEpoch: 0,
     surface: {
       heightScaleM: 14_000,
@@ -235,6 +238,7 @@ let minStarScale = 0.55
 let maxStarScale = 2.4
 let moonSizeScale = 1
 let moonHeightScale = 1
+let moonSpinScale = 1
 let observerLatitudeDeg = DEFAULT_OBSERVER_LATITUDE_DEG
 let observerLongitudeDeg = DEFAULT_OBSERVER_LONGITUDE_DEG
 let lookAtTarget = 'none'
@@ -307,6 +311,7 @@ const paneState = {
   maxStarScale,
   moonSizeScale,
   moonHeightScale,
+  moonSpinScale,
   altitudeKm: altitudeMeters / 1000,
   observerLatitudeDeg,
   observerLongitudeDeg,
@@ -332,6 +337,17 @@ const updateStarLoadProgress = ({
   starLoadedStars = loadedStars
   syncPaneState()
 }
+
+const applyPrimaryMoonSpinRate = () => {
+  const primaryMoon = EARTH_MOONS[0]
+  if (!primaryMoon) {
+    return
+  }
+
+  primaryMoon.spinRateDegPerDay = REAL_MOON_SPIN_RATE_DEG_PER_DAY * moonSpinScale
+}
+
+applyPrimaryMoonSpinRate()
 
 const applyMoonSet = () => {
   activeMoons = moonDemoEnabled ? DEMO_MOONS : EARTH_MOONS
@@ -388,6 +404,7 @@ const syncPaneState = () => {
   paneState.maxStarScale = maxStarScale
   paneState.moonSizeScale = moonSizeScale
   paneState.moonHeightScale = moonHeightScale
+  paneState.moonSpinScale = moonSpinScale
   paneState.altitudeKm = altitudeMeters / 1000
   paneState.observerLatitudeDeg = observerLatitudeDeg
   paneState.observerLongitudeDeg = observerLongitudeDeg
@@ -1102,6 +1119,18 @@ const buildControlPanel = () => {
       syncPaneState()
     })
   sceneFolder
+    .addBinding(paneState, 'moonSpinScale', {
+      label: 'Moon spin x',
+      min: MIN_MOON_SPIN_SCALE,
+      max: MAX_MOON_SPIN_SCALE,
+      step: 0.01,
+    })
+    .on('change', (event) => {
+      moonSpinScale = event.value
+      applyPrimaryMoonSpinRate()
+      syncPaneState()
+    })
+  sceneFolder
     .addBinding(paneState, 'ditheringEnabled', {
       label: 'Dither',
     })
@@ -1606,6 +1635,7 @@ const createTestApi = () => ({
     maxStarScale,
     moonSizeScale,
     moonHeightScale,
+    moonSpinScale,
     moonCount: activeMoons.length,
     altitudeMeters,
     cameraFov: camera.fov,
