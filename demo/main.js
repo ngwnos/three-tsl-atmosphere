@@ -8,6 +8,7 @@ import {
   sunDirectionFromAngles,
 } from 'three-tsl-atmosphere'
 import {
+  computeKeplerOrbitPosition,
   makeEquatorialToLocalMatrix,
   computeSunLocalAltAz,
 } from './astronomy.js'
@@ -97,6 +98,7 @@ const urlParams = new URLSearchParams(window.location.search)
 const starsEnabled = urlParams.get('stars') !== 'off'
 
 const scene = new THREE.Scene()
+const ZERO_VECTOR = new THREE.Vector3(0, 0, 0)
 const camera = new THREE.PerspectiveCamera(60, 1, 0.1, 100)
 const cameraAnchor = new THREE.Vector3(0, MIN_ALTITUDE_METERS, 0)
 const cameraEuler = new THREE.Euler(0, 0, 0, 'YXZ')
@@ -109,6 +111,13 @@ const planetCenter = new THREE.Vector3()
 const equatorialToLocalMatrix = new THREE.Matrix4()
 const sunDirection = new THREE.Vector3()
 const solarIrradiance = new THREE.Vector3()
+const trackedLookDirection = new THREE.Vector3()
+const trackedMoonPositionEquatorial = new THREE.Vector3()
+const trackedMoonPositionLocal = new THREE.Vector3()
+const trackedMoonPositionWorld = new THREE.Vector3()
+const trackedLookMatrix = new THREE.Matrix4()
+const trackedLookQuaternion = new THREE.Quaternion()
+const trackedUp = new THREE.Vector3(0, 1, 0)
 const MAX_PITCH = Math.PI * 0.48
 const MIN_FOV = 20
 const MAX_FOV = 150
@@ -129,6 +138,7 @@ let minStarScale = 0.55
 let maxStarScale = 2.4
 let observerLatitudeDeg = DEFAULT_OBSERVER_LATITUDE_DEG
 let observerLongitudeDeg = DEFAULT_OBSERVER_LONGITUDE_DEG
+let lookAtTarget = 'none'
 let sunDateTime = roundDateToMinute(new Date())
 let timeRateHoursPerSecond = 0
 let manualSunOverrideEnabled = false
@@ -186,6 +196,7 @@ const paneState = {
   sunDate: formatLocalDateInput(sunDateTime),
   sunTime: formatLocalTimeInput(sunDateTime),
   timeRateHoursPerSecond,
+  lookAtTarget,
   manualSunOverrideEnabled,
   manualSunAltitudeDeg,
   manualSunAzimuthDeg,
@@ -235,6 +246,7 @@ const syncPaneState = () => {
   paneState.sunDate = formatLocalDateInput(sunDateTime)
   paneState.sunTime = formatLocalTimeInput(sunDateTime)
   paneState.timeRateHoursPerSecond = timeRateHoursPerSecond
+  paneState.lookAtTarget = lookAtTarget
   paneState.manualSunOverrideEnabled = manualSunOverrideEnabled
   paneState.manualSunAltitudeDeg = manualSunAltitudeDeg
   paneState.manualSunAzimuthDeg = manualSunAzimuthDeg
@@ -281,6 +293,47 @@ const setCameraOrientationFromQuaternion = (quaternion) => {
   yaw = cameraEuler.y
   pitch = THREE.MathUtils.clamp(cameraEuler.x, -MAX_PITCH, MAX_PITCH)
   applyCameraOrientation()
+}
+
+const getMoonLookDirection = (target = trackedLookDirection) => {
+  const moon = EARTH_MOONS[0]
+  if (!moon) {
+    return null
+  }
+
+  computeKeplerOrbitPosition(sunDateTime, moon.orbit, trackedMoonPositionEquatorial)
+  trackedMoonPositionLocal
+    .copy(trackedMoonPositionEquatorial)
+    .applyMatrix4(equatorialToLocalMatrix)
+  trackedMoonPositionWorld.copy(planetCenter).add(trackedMoonPositionLocal)
+  target.copy(trackedMoonPositionWorld).sub(camera.position)
+
+  if (target.lengthSq() <= 1e-8) {
+    return null
+  }
+
+  return target.normalize()
+}
+
+const updateTrackedLook = () => {
+  if (lookAtTarget === 'none') {
+    return
+  }
+
+  let targetDirection = null
+  if (lookAtTarget === 'sun') {
+    targetDirection = trackedLookDirection.copy(sunDirection)
+  } else if (lookAtTarget === 'moon') {
+    targetDirection = getMoonLookDirection(trackedLookDirection)
+  }
+
+  if (!targetDirection || targetDirection.lengthSq() <= 1e-8) {
+    return
+  }
+
+  trackedLookMatrix.lookAt(ZERO_VECTOR, targetDirection, trackedUp)
+  trackedLookQuaternion.setFromRotationMatrix(trackedLookMatrix)
+  setCameraOrientationFromQuaternion(trackedLookQuaternion)
 }
 
 const handleResize = () => {
@@ -678,6 +731,20 @@ const buildControlPanel = () => {
     })
     .on('change', (event) => {
       timeRateHoursPerSecond = event.value
+      syncPaneState()
+    })
+  sceneFolder
+    .addBinding(paneState, 'lookAtTarget', {
+      label: 'Look at',
+      options: {
+        None: 'none',
+        Moon: 'moon',
+        Sun: 'sun',
+      },
+    })
+    .on('change', (event) => {
+      lookAtTarget = event.value
+      updateTrackedLook()
       syncPaneState()
     })
   sceneFolder
@@ -1210,6 +1277,7 @@ const createTestApi = () => ({
     sunState: { ...sunState },
     sunDateTimeIso: sunDateTime.toISOString(),
     timeRateHoursPerSecond,
+    lookAtTarget,
     manualSunOverrideEnabled,
     manualSunAltitudeDeg,
     manualSunAzimuthDeg,
@@ -1317,6 +1385,7 @@ const bootstrap = async () => {
     lastFrameTimeMs = nowMs
     const clockDisplayChanged = advanceSimulationTime(deltaSeconds)
     updateAltitude(deltaSeconds)
+    updateTrackedLook()
     if (clockDisplayChanged) {
       syncPaneState()
     }
