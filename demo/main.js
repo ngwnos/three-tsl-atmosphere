@@ -30,6 +30,8 @@ const MIN_ALTITUDE_SPEED_MPS = 10_000
 const ALTITUDE_SPEED_FACTOR = 1.5
 const SUN_ALTITUDE_STEP_DEG = 2
 const SUN_TIME_STEP_MINUTES = 30
+const MIN_TIME_RATE_HOURS_PER_SECOND = 0
+const MAX_TIME_RATE_HOURS_PER_SECOND = 48
 const MIN_SUN_ALTITUDE_DEG = -90
 const MAX_SUN_ALTITUDE_DEG = 90
 const MIN_EXPOSURE = 0.125
@@ -113,6 +115,7 @@ let maxStarScale = 2.4
 let observerLatitudeDeg = DEFAULT_OBSERVER_LATITUDE_DEG
 let observerLongitudeDeg = DEFAULT_OBSERVER_LONGITUDE_DEG
 let sunDateTime = roundDateToMinute(new Date())
+let timeRateHoursPerSecond = 0
 let manualSunOverrideEnabled = false
 let manualSunAltitudeDeg = 24
 let manualSunAzimuthDeg = -35
@@ -163,6 +166,7 @@ const paneState = {
   preset: 'earth',
   sunDate: formatLocalDateInput(sunDateTime),
   sunTime: formatLocalTimeInput(sunDateTime),
+  timeRateHoursPerSecond,
   manualSunOverrideEnabled,
   manualSunAltitudeDeg,
   manualSunAzimuthDeg,
@@ -210,6 +214,7 @@ const syncPaneState = () => {
   paneState.preset = atmospherePreset
   paneState.sunDate = formatLocalDateInput(sunDateTime)
   paneState.sunTime = formatLocalTimeInput(sunDateTime)
+  paneState.timeRateHoursPerSecond = timeRateHoursPerSecond
   paneState.manualSunOverrideEnabled = manualSunOverrideEnabled
   paneState.manualSunAltitudeDeg = manualSunAltitudeDeg
   paneState.manualSunAzimuthDeg = manualSunAzimuthDeg
@@ -494,6 +499,24 @@ const shiftSunDateTimeMinutes = (deltaMinutes) => {
   syncPaneState()
 }
 
+const advanceSimulationTime = (deltaSeconds) => {
+  if (timeRateHoursPerSecond === 0) {
+    return false
+  }
+
+  const previousDateString = formatLocalDateInput(sunDateTime)
+  const previousTimeString = formatLocalTimeInput(sunDateTime)
+  sunDateTime = new Date(
+    sunDateTime.getTime() + deltaSeconds * timeRateHoursPerSecond * 3600 * 1000,
+  )
+  updateAstronomyFrame()
+
+  return (
+    previousDateString !== formatLocalDateInput(sunDateTime) ||
+    previousTimeString !== formatLocalTimeInput(sunDateTime)
+  )
+}
+
 const adjustManualSunAltitude = (deltaDeg) => {
   manualSunAltitudeDeg = THREE.MathUtils.clamp(
     manualSunAltitudeDeg + deltaDeg,
@@ -653,6 +676,17 @@ const buildControlPanel = () => {
     })
     .on('change', (event) => {
       setSunDateTimeFromInputs(paneState.sunDate, event.value)
+    })
+  sceneFolder
+    .addBinding(paneState, 'timeRateHoursPerSecond', {
+      label: 'Rate h/s',
+      min: MIN_TIME_RATE_HOURS_PER_SECOND,
+      max: MAX_TIME_RATE_HOURS_PER_SECOND,
+      step: 0.01,
+    })
+    .on('change', (event) => {
+      timeRateHoursPerSecond = event.value
+      syncPaneState()
     })
   sceneFolder
     .addBinding(paneState, 'manualSunOverrideEnabled', {
@@ -1190,6 +1224,7 @@ const createTestApi = () => ({
     atmosphereSettings: { ...atmosphereSettings },
     sunState: { ...sunState },
     sunDateTimeIso: sunDateTime.toISOString(),
+    timeRateHoursPerSecond,
     manualSunOverrideEnabled,
     manualSunAltitudeDeg,
     manualSunAzimuthDeg,
@@ -1237,6 +1272,17 @@ const createTestApi = () => ({
     updateAstronomyFrame()
     syncPaneState()
     await waitForFrames(2)
+    renderDisplayFrame()
+    return sampleCanvasStats()
+  },
+  async setTimeRate(nextTimeRateHoursPerSecond) {
+    timeRateHoursPerSecond = THREE.MathUtils.clamp(
+      nextTimeRateHoursPerSecond,
+      MIN_TIME_RATE_HOURS_PER_SECOND,
+      MAX_TIME_RATE_HOURS_PER_SECOND,
+    )
+    syncPaneState()
+    await waitForFrames(1)
     renderDisplayFrame()
     return sampleCanvasStats()
   },
@@ -1288,7 +1334,11 @@ const bootstrap = async () => {
     const nowMs = performance.now()
     const deltaSeconds = Math.min((nowMs - lastFrameTimeMs) / 1000, 0.1)
     lastFrameTimeMs = nowMs
+    const clockDisplayChanged = advanceSimulationTime(deltaSeconds)
     updateAltitude(deltaSeconds)
+    if (clockDisplayChanged) {
+      syncPaneState()
+    }
     renderDisplayFrame()
   })
 }
