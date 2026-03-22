@@ -441,10 +441,12 @@ export class GaiaStarOverlay {
 
     material.colorNode = Fn(() => {
       const uv = positionLocal.xy.mul(0.5).add(0.5)
-      const fx = uv.x.mul(this.accW.toFloat()).floor()
-      const fy = uv.y.mul(this.accH.toFloat()).floor()
-      const index = fy.toUint().mul(this.accW).add(fx.toUint())
-      const pixelCoord = uvec2(fx.toUint(), fy.toUint())
+      const fx = uv.x.mul(this.accW.toFloat()).floor().clamp(0, this.accW.toFloat().sub(1))
+      const fy = uv.y.mul(this.accH.toFloat()).floor().clamp(0, this.accH.toFloat().sub(1))
+      const fxU = fx.toUint()
+      const fyU = fy.toUint()
+      const index = fyU.mul(this.accW).add(fxU)
+      const pixelCoord = uvec2(fxU, this.accH.sub(uint(1)).sub(fyU))
 
       const r = float(this.accRBuf.element(index)).mul(this.invFpScale)
       const g = float(this.accGBuf.element(index)).mul(this.invFpScale)
