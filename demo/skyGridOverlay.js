@@ -124,6 +124,7 @@ export class SkyGridOverlay {
     )
     this.raDecLines.renderOrder = -89
     this.raDecLines.frustumCulled = false
+    this.raDecLines.matrixAutoUpdate = false
     this.root.add(this.raDecLines)
 
     this.setAltAzEnabled(false)
@@ -138,8 +139,9 @@ export class SkyGridOverlay {
     this.root.position.copy(position)
   }
 
-  setEquatorialToLocal(quaternion) {
-    this.raDecLines.quaternion.copy(quaternion)
+  setEquatorialToLocal(matrix) {
+    this.raDecLines.matrix.copy(matrix)
+    this.raDecLines.matrixWorldNeedsUpdate = true
   }
 
   setAltAzEnabled(enabled) {

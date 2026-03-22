@@ -91,7 +91,6 @@ const zoomAfterDirection = new THREE.Vector3()
 const zoomRotation = new THREE.Quaternion()
 const zoomedCameraQuaternion = new THREE.Quaternion()
 const planetCenter = new THREE.Vector3()
-const equatorialToLocalQuaternion = new THREE.Quaternion()
 const equatorialToLocalMatrix = new THREE.Matrix4()
 const MAX_PITCH = Math.PI * 0.48
 const MIN_FOV = 20
@@ -204,8 +203,7 @@ const updateAstronomyFrame = () => {
     observerLongitudeDeg,
     equatorialToLocalMatrix,
   )
-  equatorialToLocalQuaternion.setFromRotationMatrix(equatorialToLocalMatrix)
-  gridOverlay.setEquatorialToLocal(equatorialToLocalQuaternion)
+  gridOverlay.setEquatorialToLocal(equatorialToLocalMatrix)
   starOverlay.setEquatorialToLocal(equatorialToLocalMatrix)
   applyResolvedSunAngles()
 }
