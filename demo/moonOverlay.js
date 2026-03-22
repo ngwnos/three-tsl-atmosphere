@@ -19,7 +19,7 @@ import { computeKeplerOrbitPosition } from './astronomy.js'
 
 const DEFAULT_MAX_MOONS = 16
 const DEFAULT_EXPOSURE = 1
-const ZERO_VECTOR = new THREE.Vector3(0, 0, 0)
+const DEFAULT_DISPLAY_DISTANCE = 90
 
 const createMoonMaterial = () => {
   const moonColor = uniform(new THREE.Vector3(1, 1, 1))
@@ -74,7 +74,7 @@ const segmentIntersectsSphere = (start, end, center, radius) => {
 const projectMoonToNdcRadius = (
   camera,
   viewDirection,
-  distanceMeters,
+  displayDistance,
   angularRadiusRad,
   centerNdc,
   targetRight = new THREE.Vector3(),
@@ -97,7 +97,7 @@ const projectMoonToNdcRadius = (
     .normalize()
   const edgeNdc = camera.position
     .clone()
-    .addScaledVector(edgeDirection, distanceMeters)
+    .addScaledVector(edgeDirection, displayDistance)
     .project(camera)
 
   return Math.hypot(edgeNdc.x - centerNdc.x, edgeNdc.y - centerNdc.y)
@@ -114,6 +114,7 @@ export class MoonOverlay {
     this.solarIrradiance = new THREE.Vector3(1, 1, 1)
     this.sunDirection = new THREE.Vector3(0, 1, 0)
     this.exposure = DEFAULT_EXPOSURE
+    this.displayDistance = Math.max(1, options.displayDistance ?? DEFAULT_DISPLAY_DISTANCE)
     this.moons = []
     this.moonQuads = []
 
@@ -126,6 +127,7 @@ export class MoonOverlay {
     this.tmpMoonColor = new THREE.Color()
     this.tmpMoonColorVector = new THREE.Vector3()
     this.tmpProjectedCenter = new THREE.Vector3()
+    this.tmpProjectedWorld = new THREE.Vector3()
     this.tmpRight = new THREE.Vector3()
     this.tmpUp = new THREE.Vector3()
     this.tmpEdge = new THREE.Vector3()
@@ -198,7 +200,10 @@ export class MoonOverlay {
     }
 
     this.tmpViewDirection.copy(this.tmpViewVector).divideScalar(distanceMeters)
-    this.tmpProjectedCenter.copy(this.tmpMoonPositionWorld).project(camera)
+    this.tmpProjectedWorld
+      .copy(camera.position)
+      .addScaledVector(this.tmpViewDirection, this.displayDistance)
+    this.tmpProjectedCenter.copy(this.tmpProjectedWorld).project(camera)
 
     if (
       this.tmpProjectedCenter.z <= 0 ||
@@ -218,7 +223,7 @@ export class MoonOverlay {
     const radiusNdc = projectMoonToNdcRadius(
       camera,
       this.tmpViewDirection,
-      distanceMeters,
+      this.displayDistance,
       angularRadiusRad,
       this.tmpProjectedCenter,
       this.tmpRight,
