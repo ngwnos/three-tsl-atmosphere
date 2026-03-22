@@ -124,8 +124,11 @@ export class SkyGridOverlay {
     )
     this.raDecLines.renderOrder = -89
     this.raDecLines.frustumCulled = false
-    this.raDecLines.matrixAutoUpdate = false
     this.root.add(this.raDecLines)
+    this.raDecBasePositions = Float32Array.from(
+      this.raDecLines.geometry.getAttribute('position').array,
+    )
+    this.tmpTransformedPoint = new THREE.Vector3()
 
     this.setAltAzEnabled(false)
     this.setRaDecEnabled(false)
@@ -140,8 +143,22 @@ export class SkyGridOverlay {
   }
 
   setEquatorialToLocal(matrix) {
-    this.raDecLines.matrix.copy(matrix)
-    this.raDecLines.matrixWorldNeedsUpdate = true
+    const attribute = this.raDecLines.geometry.getAttribute('position')
+    const positions = attribute.array
+    for (let index = 0; index < this.raDecBasePositions.length; index += 3) {
+      this.tmpTransformedPoint
+        .set(
+          this.raDecBasePositions[index],
+          this.raDecBasePositions[index + 1],
+          this.raDecBasePositions[index + 2],
+        )
+        .applyMatrix4(matrix)
+      positions[index] = this.tmpTransformedPoint.x
+      positions[index + 1] = this.tmpTransformedPoint.y
+      positions[index + 2] = this.tmpTransformedPoint.z
+    }
+    attribute.needsUpdate = true
+    this.raDecLines.geometry.computeBoundingSphere()
   }
 
   setAltAzEnabled(enabled) {
