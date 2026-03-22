@@ -35,6 +35,8 @@ const EXPOSURE_STEP_STOPS = 1 / 3
 const MIN_STAR_SCALE_LIMIT = 0.1
 const MAX_STAR_SCALE_LIMIT = 8
 const STAR_SCALE_STEP = Math.SQRT2
+const MIN_MOON_SIZE_SCALE = 0.1
+const MAX_MOON_SIZE_SCALE = 10
 const DEFAULT_OBSERVER_LATITUDE_DEG = 37.7749
 const DEFAULT_OBSERVER_LONGITUDE_DEG = -122.4194
 const MAX_MOON_COUNT = 16
@@ -173,6 +175,7 @@ let exposure = 1
 let ditheringEnabled = true
 let minStarScale = 0.55
 let maxStarScale = 2.4
+let moonSizeScale = 1
 let observerLatitudeDeg = DEFAULT_OBSERVER_LATITUDE_DEG
 let observerLongitudeDeg = DEFAULT_OBSERVER_LONGITUDE_DEG
 let lookAtTarget = 'none'
@@ -243,6 +246,7 @@ const paneState = {
   ditheringEnabled,
   minStarScale,
   maxStarScale,
+  moonSizeScale,
   altitudeKm: altitudeMeters / 1000,
   observerLatitudeDeg,
   observerLongitudeDeg,
@@ -304,6 +308,7 @@ const syncPaneState = () => {
   paneState.ditheringEnabled = ditheringEnabled
   paneState.minStarScale = minStarScale
   paneState.maxStarScale = maxStarScale
+  paneState.moonSizeScale = moonSizeScale
   paneState.altitudeKm = altitudeMeters / 1000
   paneState.observerLatitudeDeg = observerLatitudeDeg
   paneState.observerLongitudeDeg = observerLongitudeDeg
@@ -330,6 +335,7 @@ const applyVisualExposure = () => {
     .addScaledVector(sunDirection, atmosphereSettings.planetStarDistanceM)
   moonOverlay.setSunPosition(sunWorldPosition)
   moonOverlay.setExposure(exposure)
+  moonOverlay.setSizeScale(moonSizeScale)
 }
 
 const applyCameraOrientation = () => {
@@ -985,6 +991,18 @@ const buildControlPanel = () => {
       syncPaneState()
     })
   sceneFolder
+    .addBinding(paneState, 'moonSizeScale', {
+      label: 'Moon size',
+      min: MIN_MOON_SIZE_SCALE,
+      max: MAX_MOON_SIZE_SCALE,
+      step: 0.01,
+    })
+    .on('change', (event) => {
+      moonSizeScale = event.value
+      moonOverlay.setSizeScale(moonSizeScale)
+      syncPaneState()
+    })
+  sceneFolder
     .addBinding(paneState, 'ditheringEnabled', {
       label: 'Dither',
     })
@@ -1476,6 +1494,7 @@ const createTestApi = () => ({
     ditheringEnabled,
     minStarScale,
     maxStarScale,
+    moonSizeScale,
     moonCount: activeMoons.length,
     altitudeMeters,
     cameraFov: camera.fov,

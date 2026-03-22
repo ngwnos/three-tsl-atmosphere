@@ -161,6 +161,7 @@ export class MoonOverlay {
     this.solarIrradiance = new THREE.Vector3(1, 1, 1)
     this.sunWorldPosition = new THREE.Vector3(0, 1, 0)
     this.exposure = DEFAULT_EXPOSURE
+    this.sizeScale = 1
     this.displayDistance = Math.max(1, options.displayDistance ?? DEFAULT_DISPLAY_DISTANCE)
     this.moons = []
     this.transmittanceTextureNode = texture(new THREE.Texture())
@@ -227,6 +228,10 @@ export class MoonOverlay {
     this.exposure = Math.max(0, exposure)
   }
 
+  setSizeScale(scale) {
+    this.sizeScale = Math.max(0.01, scale)
+  }
+
   setTransmittanceTexture(textureValue) {
     this.transmittanceTextureNode.value = textureValue ?? new THREE.Texture()
   }
@@ -257,7 +262,7 @@ export class MoonOverlay {
     }
 
     const angularRadiusRad = Math.asin(
-      THREE.MathUtils.clamp(moon.radiusM / distanceMeters, 1e-8, 0.999999),
+      THREE.MathUtils.clamp((moon.radiusM * this.sizeScale) / distanceMeters, 1e-8, 0.999999),
     )
     const radiusPx = projectMoonToPixelRadius(
       camera,
