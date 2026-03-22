@@ -2975,6 +2975,7 @@ var DEFAULT_ATMOSPHERE_SETTINGS = {
   skyTintR: 1,
   skyTintG: 1,
   skyTintB: 1,
+  groundOpacity: 1,
   sunDiscIntensity: 1.4,
   sunDiscColorR: 1,
   sunDiscColorG: 0.9686274509803922,
@@ -3096,8 +3097,15 @@ var createAtmosphereSystem = (scene, initialSettings = DEFAULT_ATMOSPHERE_SETTIN
   const lutNode = new AtmosphereLUTNode(parameters);
   let atmosphereContext = new AtmosphereContextNode(parameters, lutNode);
   atmosphereContext.worldToUnitScene.value = parameters.worldToUnit * metersPerWorldUnit;
+  const noGroundAtmosphereContext = new AtmosphereContextNode(parameters, lutNode);
+  noGroundAtmosphereContext.showGround = false;
+  noGroundAtmosphereContext.constrainCamera = atmosphereContext.constrainCamera;
+  noGroundAtmosphereContext.planetCenterWorld = atmosphereContext.planetCenterWorld;
+  noGroundAtmosphereContext.sunDirectionWorld = atmosphereContext.sunDirectionWorld;
+  noGroundAtmosphereContext.worldToUnitScene = atmosphereContext.worldToUnitScene;
   const skyIntensity = uniform4(settings.skyIntensity);
   const skyTint = uniform4(new THREE.Vector3(settings.skyTintR, settings.skyTintG, settings.skyTintB));
+  const groundOpacity = uniform4(settings.groundOpacity);
   const sunDiscIntensity = uniform4(settings.sunDiscIntensity);
   const sunDiscColor = uniform4(
     new THREE.Vector3(settings.sunDiscColorR, settings.sunDiscColorG, settings.sunDiscColorB)
@@ -3108,13 +3116,30 @@ var createAtmosphereSystem = (scene, initialSettings = DEFAULT_ATMOSPHERE_SETTIN
   const screenCameraWorldPosition = uniform4(new THREE.Vector3());
   const screenCameraIsOrthographic = uniform4(false);
   const geometry = new THREE.SphereGeometry(skyDomeRadiusMeters * worldUnitsPerMeter, 64, 32);
+  const buildSkyTransferNode = (cameraUnitNode, worldViewDirNode, worldSunDirNode, contextNode) => Fn4(() => getSkyLuminance(cameraUnitNode, worldViewDirNode, float4(0), worldSunDirNode))().context({
+    atmosphere: contextNode
+  });
   const buildSkyLuminanceNode = (cameraWorldPositionNode, worldViewDirNode, softenPlanetMask) => Fn4(() => {
     const worldViewDir = normalize(worldViewDirNode).toVar();
     const worldSunDir = normalize(atmosphereContext.sunDirectionWorld).toVar();
     const cameraUnit = cameraWorldPositionNode.sub(atmosphereContext.planetCenterWorld).mul(atmosphereContext.worldToUnitScene).toVar();
     const cameraRadius = cameraUnit.length().toVar();
-    const skyTransfer = getSkyLuminance(cameraUnit, worldViewDir, float4(0), worldSunDir).toVar();
-    const skyLuminance = skyTransfer.get("luminance").mul(skyIntensity).mul(skyTint).toVar();
+    const clampedGroundOpacity = groundOpacity.clamp(0, 1).toVar();
+    const throughGroundFactor = float4(1).sub(clampedGroundOpacity).toVar();
+    const skyTransfer = buildSkyTransferNode(
+      cameraUnit,
+      worldViewDir,
+      worldSunDir,
+      atmosphereContext
+    ).toVar();
+    const skyTransferNoGround = buildSkyTransferNode(
+      cameraUnit,
+      worldViewDir,
+      worldSunDir,
+      noGroundAtmosphereContext
+    ).toVar();
+    const skyLuminance = skyTransfer.get("luminance").mul(clampedGroundOpacity).add(skyTransferNoGround.get("luminance").mul(throughGroundFactor)).mul(skyIntensity).mul(skyTint).toVar();
+    const skyTransmittance = skyTransfer.get("transmittance").mul(clampedGroundOpacity).add(skyTransferNoGround.get("transmittance").mul(throughGroundFactor)).toVar();
     const sunChordThreshold = cos2(sunDiscAngularRadius).oneMinus().mul(2).toVar();
     const sunChordVector = worldViewDir.sub(worldSunDir).toVar();
     const sunChordLength = dot(sunChordVector, sunChordVector).toVar();
@@ -3124,7 +3149,7 @@ var createAtmosphereSystem = (scene, initialSettings = DEFAULT_ATMOSPHERE_SETTIN
       sunChordThreshold.sub(sunFilterWidth),
       sunChordLength
     ).mul(sunDiscIntensity).toVar();
-    const sunDiscLuminance = getSolarLuminance().mul(vec36(sunDiscColor)).mul(sunDisc).mul(skyTransfer.get("transmittance")).toVar();
+    const sunDiscLuminance = getSolarLuminance().mul(vec36(sunDiscColor)).mul(sunDisc).mul(skyTransmittance).toVar();
     if (!softenPlanetMask) {
       return skyLuminance.add(sunDiscLuminance);
     }
@@ -3196,8 +3221,24 @@ var createAtmosphereSystem = (scene, initialSettings = DEFAULT_ATMOSPHERE_SETTIN
     ).toVar();
     const cameraUnit = worldOrigin.sub(atmosphereContext.planetCenterWorld).mul(atmosphereContext.worldToUnitScene).toVar();
     const worldSunDir = normalize(atmosphereContext.sunDirectionWorld).toVar();
-    const skyTransfer = getSkyLuminance(cameraUnit, worldViewDirection, float4(0), worldSunDir).toVar();
-    return vec45(skyTransfer.get("transmittance"), float4(1));
+    const clampedGroundOpacity = groundOpacity.clamp(0, 1).toVar();
+    const throughGroundFactor = float4(1).sub(clampedGroundOpacity).toVar();
+    const skyTransfer = buildSkyTransferNode(
+      cameraUnit,
+      worldViewDirection,
+      worldSunDir,
+      atmosphereContext
+    ).toVar();
+    const skyTransferNoGround = buildSkyTransferNode(
+      cameraUnit,
+      worldViewDirection,
+      worldSunDir,
+      noGroundAtmosphereContext
+    ).toVar();
+    return vec45(
+      skyTransfer.get("transmittance").mul(clampedGroundOpacity).add(skyTransferNoGround.get("transmittance").mul(throughGroundFactor)),
+      float4(1)
+    );
   })().context({ atmosphere: atmosphereContext });
   const createSkyMaterial = () => {
     const material2 = new MeshBasicNodeMaterial();
@@ -3226,6 +3267,7 @@ var createAtmosphereSystem = (scene, initialSettings = DEFAULT_ATMOSPHERE_SETTIN
   let backgroundScene = null;
   let backgroundCamera = null;
   let backgroundQuad = null;
+  let transmittanceMaterial = null;
   let transmittanceScene = null;
   let transmittanceCamera = null;
   let transmittanceQuad = null;
@@ -3237,10 +3279,8 @@ var createAtmosphereSystem = (scene, initialSettings = DEFAULT_ATMOSPHERE_SETTIN
     backgroundScene.add(backgroundQuad);
     transmittanceScene = new THREE.Scene();
     transmittanceCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
-    transmittanceQuad = new THREE.Mesh(
-      new THREE.PlaneGeometry(2, 2),
-      createScreenSpaceTransmittanceMaterial()
-    );
+    transmittanceMaterial = createScreenSpaceTransmittanceMaterial();
+    transmittanceQuad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), transmittanceMaterial);
     transmittanceQuad.frustumCulled = false;
     transmittanceScene.add(transmittanceQuad);
     material.dispose();
@@ -3300,17 +3340,24 @@ var createAtmosphereSystem = (scene, initialSettings = DEFAULT_ATMOSPHERE_SETTIN
     parametersSnapshot
   }) => {
     atmosphereContext.applyParameters(parametersSnapshot);
+    noGroundAtmosphereContext.applyParameters(parametersSnapshot);
     atmosphereContext.planetCenterWorld.value.set(0, -planetRadiusMeters * worldUnitsPerMeter, 0);
     atmosphereContext.worldToUnitScene.value = parametersSnapshot.worldToUnit * metersPerWorldUnit;
     const nextMaterial = presentationMode === "screen-space" ? createScreenSpaceMaterial() : createSkyMaterial();
+    const nextTransmittanceMaterial = presentationMode === "screen-space" ? createScreenSpaceTransmittanceMaterial() : null;
     if (skyMesh) {
       skyMesh.material = nextMaterial;
     }
     if (backgroundQuad) {
       backgroundQuad.material = nextMaterial;
     }
+    if (transmittanceQuad && nextTransmittanceMaterial) {
+      transmittanceQuad.material = nextTransmittanceMaterial;
+    }
     material.dispose();
+    transmittanceMaterial?.dispose();
     material = nextMaterial;
+    transmittanceMaterial = nextTransmittanceMaterial;
   };
   const applyVisualSettings = () => {
     skyIntensity.value = clampNonNegative(settings.skyIntensity);
@@ -3319,6 +3366,7 @@ var createAtmosphereSystem = (scene, initialSettings = DEFAULT_ATMOSPHERE_SETTIN
       clampNonNegative(settings.skyTintG),
       clampNonNegative(settings.skyTintB)
     );
+    groundOpacity.value = clamp01(settings.groundOpacity);
     sunDiscIntensity.value = clampNonNegative(settings.sunDiscIntensity);
     sunDiscColor.value.set(
       clampNonNegative(settings.sunDiscColorR),
@@ -3445,9 +3493,9 @@ var createAtmosphereSystem = (scene, initialSettings = DEFAULT_ATMOSPHERE_SETTIN
     if (transmittanceScene && transmittanceQuad) {
       transmittanceScene.remove(transmittanceQuad);
       transmittanceQuad.geometry.dispose();
-      transmittanceQuad.material.dispose();
     }
     geometry.dispose();
+    transmittanceMaterial?.dispose();
     material.dispose();
     atmosphereContext.dispose();
   };
