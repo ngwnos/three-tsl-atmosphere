@@ -81,8 +81,10 @@ const createMoonSelectionNode = (moonStates, transmittanceTextureNode) =>
     for (const moonState of moonStates) {
       If(moonState.active.greaterThan(0.5), () => {
         const radiusPx = moonState.centerRadiusDistance.z.max(float(1e-4)).toVar()
-        const discUv = pixelCoord
-          .sub(moonState.centerRadiusDistance.xy)
+        const discUv = vec2(
+          pixelCoord.x.sub(moonState.centerRadiusDistance.x),
+          moonState.centerRadiusDistance.y.sub(pixelCoord.y),
+        )
           .div(vec2(radiusPx, radiusPx))
           .toVar()
         const discRadiusSquared = dot(discUv, discUv).toVar()
@@ -157,7 +159,7 @@ export class MoonOverlay {
     this.planetRadius = 1
     this.equatorialToLocal = new THREE.Matrix4()
     this.solarIrradiance = new THREE.Vector3(1, 1, 1)
-    this.sunDirection = new THREE.Vector3(0, 1, 0)
+    this.sunWorldPosition = new THREE.Vector3(0, 1, 0)
     this.exposure = DEFAULT_EXPOSURE
     this.displayDistance = Math.max(1, options.displayDistance ?? DEFAULT_DISPLAY_DISTANCE)
     this.moons = []
@@ -175,6 +177,7 @@ export class MoonOverlay {
     this.tmpViewVector = new THREE.Vector3()
     this.tmpSunDirection = new THREE.Vector3()
     this.tmpViewDirection = new THREE.Vector3()
+    this.tmpMoonToCamera = new THREE.Vector3()
     this.tmpMoonColor = new THREE.Color()
     this.tmpMoonColorVector = new THREE.Vector3()
     this.tmpProjectedCenter = new THREE.Vector3()
@@ -212,8 +215,8 @@ export class MoonOverlay {
     this.equatorialToLocal.copy(matrix)
   }
 
-  setSunDirection(direction) {
-    this.sunDirection.copy(direction).normalize()
+  setSunPosition(position) {
+    this.sunWorldPosition.copy(position)
   }
 
   setSolarIrradiance(irradiance) {
@@ -293,10 +296,14 @@ export class MoonOverlay {
       (this.tmpMoonColor.b * this.solarIrradiance.z * this.exposure) / Math.PI,
     )
 
-    const sunDirectionLocal = this.tmpSunDirection.copy(this.sunDirection)
-    const upProjection = sunDirectionLocal.dot(this.tmpUp)
-    const rightProjection = sunDirectionLocal.dot(this.tmpRight)
-    const forwardProjection = sunDirectionLocal.dot(this.tmpViewDirection)
+    const moonToSun = this.tmpSunDirection
+      .copy(this.sunWorldPosition)
+      .sub(this.tmpMoonPositionWorld)
+      .normalize()
+    const moonToCamera = this.tmpMoonToCamera.copy(this.tmpViewDirection).negate()
+    const upProjection = moonToSun.dot(this.tmpUp)
+    const rightProjection = moonToSun.dot(this.tmpRight)
+    const forwardProjection = moonToSun.dot(moonToCamera)
 
     moonState.active.value = 1
     moonState.centerRadiusDistance.value.set(centerXPx, centerYPx, radiusPx, distanceMeters)

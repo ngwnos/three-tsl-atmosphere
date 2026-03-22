@@ -110,6 +110,7 @@ const zoomedCameraQuaternion = new THREE.Quaternion()
 const planetCenter = new THREE.Vector3()
 const equatorialToLocalMatrix = new THREE.Matrix4()
 const sunDirection = new THREE.Vector3()
+const sunWorldPosition = new THREE.Vector3()
 const solarIrradiance = new THREE.Vector3()
 const trackedLookDirection = new THREE.Vector3()
 const trackedMoonPositionEquatorial = new THREE.Vector3()
@@ -223,7 +224,10 @@ const applyResolvedSunAngles = () => {
 
   atmosphereRig.setSunAngles(sunState.altitudeDeg, sunState.azimuthDeg)
   sunDirectionFromAngles(sunState.altitudeDeg, sunState.azimuthDeg, sunDirection)
-  moonOverlay.setSunDirection(sunDirection)
+  sunWorldPosition
+    .copy(planetCenter)
+    .addScaledVector(sunDirection, atmosphereSettings.planetStarDistanceM)
+  moonOverlay.setSunPosition(sunWorldPosition)
 }
 
 const updateAstronomyFrame = () => {
@@ -272,6 +276,10 @@ const applyVisualExposure = () => {
   starOverlay.setScaleRange(minStarScale, maxStarScale)
   moonOverlay.setPlanet(planetCenter, atmosphereSettings.planetRadiusM)
   moonOverlay.setSolarIrradiance(deriveSolarIrradiance(atmosphereSettings, solarIrradiance))
+  sunWorldPosition
+    .copy(planetCenter)
+    .addScaledVector(sunDirection, atmosphereSettings.planetStarDistanceM)
+  moonOverlay.setSunPosition(sunWorldPosition)
   moonOverlay.setExposure(exposure)
 }
 
